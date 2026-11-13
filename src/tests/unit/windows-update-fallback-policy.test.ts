@@ -8,7 +8,7 @@ const electronUpdate: ManualUpdateCheckResult = {
     version: '1.3.0',
     tagName: 'v1.3.0',
     releaseName: 'v1.3.0',
-    releaseUrl: 'https://github.com/Draculabo/AntigravityManager/releases/tag/v1.3.0',
+    releaseUrl: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/v1.3.0',
     platform: 'win32',
     source: 'electron-updater',
     state: 'available',
@@ -21,7 +21,7 @@ const manualUpdate: ManualUpdateCheckResult = {
     version: '1.3.0',
     tagName: 'v1.3.0',
     releaseName: 'v1.3.0',
-    releaseUrl: 'https://github.com/Draculabo/AntigravityManager/releases/tag/v1.3.0',
+    releaseUrl: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/v1.3.0',
     platform: 'win32',
   },
 };

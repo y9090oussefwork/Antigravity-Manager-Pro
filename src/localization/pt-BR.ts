@@ -990,6 +990,8 @@ const ptBR = {
       turkish: 'Turkish',
       french: 'French',
       portuguese: 'Português (Brasil)',
+      japanese: 'Japonês',
+      arabicEgyptian: 'Árabe (Egito)',
     },
     about: {
       title: 'Sobre',
@@ -1533,6 +1535,35 @@ const ptBR = {
           'Relate este problema no GitHub. Clique para copiar as informações de erro e abrir o formulário de relatório.',
         openRepository: 'Abrir Repositório no GitHub',
       },
+    },
+    'search-placeholder': 'Buscar contas por e-mail, nome ou plano...',
+    'search-clear': 'Limpar busca',
+    'compact-summary-toggle': 'Resumo de uso',
+    'compact-summary-description':
+      'Exibir os limites do Antigravity em um resumo compacto sem alterar a visualização detalhada',
+    'compact-summary': {
+      'five-hour-limit': 'Limite de 5h',
+      'weekly-limit': 'Limite semanal',
+      'gemini-models': 'Modelos Gemini',
+      'claude-gpt-models': 'Modelos Claude e GPT',
+      'resets-in': 'Reinicia em ',
+      'percent-left': '{{percent}}% restante',
+    },
+    'switch-conflict-dialog': {
+      title: 'Fechar janelas abertas do Antigravity',
+      description:
+        'O Antigravity ainda tem várias janelas ou processos em segundo plano abertos. Feche os processos abaixo ou feche todos e tente novamente.',
+      'description-with-account':
+        'O Antigravity ainda tem várias janelas ou processos em segundo plano abertos, impedindo a troca para {{email}}. Feche os processos abaixo ou feche todos e tente novamente.',
+      'running-count': 'Processos em execução: {{count}}',
+      refresh: 'Atualizar',
+      'all-closed':
+        'Todos os processos do Antigravity foram fechados. Você pode tentar alternar novamente.',
+      'isolated-profile': 'Perfil isolado: {{path}}',
+      'default-profile': 'Perfil padrão',
+      'close-one': 'Fechar',
+      'retry-switch': 'Tentar novamente',
+      'close-all-and-retry': 'Fechar tudo e tentar novamente',
     },
     toast: {
       validationLinkFailed: {

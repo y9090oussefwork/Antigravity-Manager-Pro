@@ -59,7 +59,7 @@ describe('manual update checker', () => {
   it('uses the module-owned Axios client for a valid updater payload', async () => {
     mocks.axiosGet.mockResolvedValueOnce(
       createResponse({
-        url: 'https://github.com/Draculabo/AntigravityManager/releases/tag/v1.2.0',
+        url: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/v1.2.0',
         version: '1.2.0',
       }),
     );
@@ -79,7 +79,7 @@ describe('manual update checker', () => {
       }),
     );
     expect(mocks.axiosGet).toHaveBeenCalledWith(
-      'https://github.com/Draculabo/AntigravityManager/releases/latest/download/updater.json',
+      'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/latest/download/updater.json',
       expect.objectContaining({ validateStatus: expect.any(Function) }),
     );
   });
@@ -88,7 +88,7 @@ describe('manual update checker', () => {
     mocks.axiosGet.mockResolvedValueOnce(createResponse({ version: 123 })).mockResolvedValueOnce(
       createResponse({
         draft: false,
-        html_url: 'https://github.com/Draculabo/AntigravityManager/releases/tag/v1.3.0',
+        html_url: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/v1.3.0',
         name: 'Antigravity Manager 1.3.0',
         prerelease: false,
         tag_name: 'v1.3.0',
@@ -104,7 +104,7 @@ describe('manual update checker', () => {
     });
     expect(mocks.axiosGet).toHaveBeenNthCalledWith(
       2,
-      'https://api.github.com/repos/Draculabo/AntigravityManager/releases/latest',
+      'https://api.github.com/repos/y9090oussefwork/Antigravity-Manager-Pro/releases/latest',
       expect.objectContaining({
         headers: { Accept: 'application/vnd.github+json' },
         validateStatus: expect.any(Function),

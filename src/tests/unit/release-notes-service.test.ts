@@ -10,8 +10,8 @@ vi.mock('@/shared/http/axios-json-client', () => ({
 vi.mock('@/shared/logging/logger', () => ({ logger: { warn } }));
 
 const tagName = 'v1.2.3';
-const metadataUrl = `https://github.com/Draculabo/AntigravityManager/releases/download/${tagName}/updater.json`;
-const apiUrl = `https://api.github.com/repos/Draculabo/AntigravityManager/releases/tags/${tagName}`;
+const metadataUrl = `https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/download/${tagName}/updater.json`;
+const apiUrl = `https://api.github.com/repos/y9090oussefwork/Antigravity-Manager-Pro/releases/tags/${tagName}`;
 const publishedAt = '2026-10-08T00:00:00Z';
 
 function respondWith(...payloads: unknown[]) {

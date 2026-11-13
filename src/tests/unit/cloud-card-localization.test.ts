@@ -7,6 +7,7 @@ import tr from '@/localization/tr';
 import vi from '@/localization/vi';
 import zhCn from '@/localization/zh-CN';
 import ptBr from '@/localization/pt-BR';
+import arEg from '@/localization/ar-EG';
 
 const locales = [
   { code: 'en', card: en.cloud.card },
@@ -16,6 +17,7 @@ const locales = [
   { code: 'tr', card: tr.cloud.card },
   { code: 'fr', card: fr.cloud.card },
   { code: 'pt-BR', card: ptBr.cloud.card },
+  { code: 'ar-EG', card: arEg.cloud.card },
 ];
 
 describe('cloud account validation translations', () => {

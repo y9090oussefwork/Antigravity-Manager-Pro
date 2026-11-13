@@ -4,10 +4,10 @@ import { getWindowsUpdateBaseUrl } from '@/modules/app-shell/update/windowsUpdat
 describe('Windows update source', () => {
   it('uses per-arch static storage paths for Squirrel feeds', () => {
     expect(getWindowsUpdateBaseUrl({ platform: 'win32', arch: 'x64' })).toBe(
-      'https://raw.githubusercontent.com/Draculabo/AntigravityManager/release-updates/win32/x64',
+      'https://raw.githubusercontent.com/y9090oussefwork/Antigravity-Manager-Pro/release-updates/win32/x64',
     );
     expect(getWindowsUpdateBaseUrl({ platform: 'win32', arch: 'arm64' })).toBe(
-      'https://raw.githubusercontent.com/Draculabo/AntigravityManager/release-updates/win32/arm64',
+      'https://raw.githubusercontent.com/y9090oussefwork/Antigravity-Manager-Pro/release-updates/win32/arm64',
     );
   });
 });

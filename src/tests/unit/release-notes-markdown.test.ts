@@ -23,7 +23,7 @@ describe('release notes Markdown', () => {
 
   it('routes approved links through the explicit opening action', () => {
     const onOpenLink = vi.fn();
-    const url = 'https://github.com/Draculabo/AntigravityManager/pull/123';
+    const url = 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/pull/123';
     render(createElement(ReleaseNotesMarkdown, { notes: `[PR #123](${url})`, onOpenLink }));
     fireEvent.click(screen.getByRole('link', { name: 'PR #123' }));
     expect(onOpenLink).toHaveBeenCalledExactlyOnceWith(url);

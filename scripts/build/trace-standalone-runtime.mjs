@@ -13,8 +13,6 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nodeFileTrace } from '@vercel/nft';
-import { c as archiveTar, x as extractTar } from 'tar';
-import { pipeline } from 'node:stream/promises';
 
 const entries = [
   'core/main.cjs',
@@ -185,8 +183,16 @@ export async function traceRuntime(root) {
 export async function materializeRuntime(root, output) {
   const trace = await traceRuntime(root);
   await mkdir(output);
-  // Serialize tar jobs: concurrent hardlink entries can leave the pack queue unsettled.
-  await pipeline(archiveTar({ cwd: root, jobs: 1 }, trace.files), extractTar({ cwd: output }));
+  const createdDirs = new Set();
+  for (const file of trace.files) {
+    const destination = path.join(output, file);
+    const parentDir = path.dirname(destination);
+    if (!createdDirs.has(parentDir)) {
+      await mkdir(parentDir, { recursive: true });
+      createdDirs.add(parentDir);
+    }
+    await cp(path.join(root, file), destination, { verbatimSymlinks: true });
+  }
   for (const resource of ['node', 'assets', 'package.json', 'pnpm-lock.yaml', 'LICENSE']) {
     await cp(path.join(root, resource), path.join(output, resource), { recursive: true });
   }

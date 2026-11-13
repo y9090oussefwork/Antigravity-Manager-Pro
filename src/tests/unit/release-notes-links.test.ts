@@ -4,12 +4,12 @@ import { isTrustedExternalUrl } from '@/modules/app-shell/utils/externalUrlPolic
 
 describe('release-note external navigation', () => {
   it.each([
-    'https://github.com/Draculabo/AntigravityManager/releases',
-    'https://github.com/Draculabo/AntigravityManager/pull/123',
-    'https://github.com/Draculabo/AntigravityManager/issues/123',
-    'https://github.com/Draculabo/AntigravityManager/commit/abc',
-    'https://github.com/Draculabo/AntigravityManager/compare/v1.0.0...v1.2.3',
-    'https://github.com/Draculabo/AntigravityManager/blob/main/CHANGELOG.md',
+    'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases',
+    'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/pull/123',
+    'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/issues/123',
+    'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/commit/abc',
+    'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/compare/v1.0.0...v1.2.3',
+    'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/blob/main/CHANGELOG.md',
     'https://github.com/contributor-name',
   ])('allows a release-note destination: %s', (url) => {
     expect(isReleaseNotesLink(url)).toBe(true);
@@ -18,22 +18,22 @@ describe('release-note external navigation', () => {
   it.each([
     'javascript:alert(1)',
     'file:///C:/Windows',
-    'http://github.com/Draculabo/AntigravityManager/releases',
-    'https://github.com.evil.example/Draculabo/AntigravityManager',
-    'https://github.com@evil.example/Draculabo/AntigravityManager',
-    'https://user:password@github.com/Draculabo/AntigravityManager',
+    'http://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases',
+    'https://github.com.evil.example/y9090oussefwork/Antigravity-Manager-Pro',
+    'https://github.com@evil.example/y9090oussefwork/Antigravity-Manager-Pro',
+    'https://user:password@github.com/y9090oussefwork/Antigravity-Manager-Pro',
     'https://github.com/Draculabo/AnotherRepository',
-    'https://github.com/Draculabo/AntigravityManager-other/releases',
+    'https://github.com/y9090oussefwork/Antigravity-Manager-Pro-other/releases',
     'https://github.com/login',
     'https://github.com/settings',
     'https://github.com/contributor-name?redirect=elsewhere',
-    'https://github.com/Draculabo/AntigravityManager/%2fother',
+    'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/%2fother',
   ])('rejects a destination outside the release-note allowlist: %s', (url) => {
     expect(isReleaseNotesLink(url)).toBe(false);
   });
 
   it('keeps the broader allowance out of the existing general external-link policy', () => {
-    expect(isTrustedExternalUrl('https://github.com/Draculabo/AntigravityManager/pull/123')).toBe(
+    expect(isTrustedExternalUrl('https://github.com/y9090oussefwork/Antigravity-Manager-Pro/pull/123')).toBe(
       false,
     );
     expect(isTrustedExternalUrl('https://github.com/contributor-name')).toBe(false);

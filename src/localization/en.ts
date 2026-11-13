@@ -738,6 +738,7 @@ const en = {
       french: 'French',
       portuguese: 'Portuguese (Brazil)',
       japanese: 'Japanese',
+      arabicEgyptian: 'Arabic (Egypt)',
     },
     about: {
       title: 'About',
@@ -1299,6 +1300,34 @@ const en = {
           'Report this problem on GitHub. Click to copy your error information and open the report form.',
         openRepository: 'Open GitHub Repository',
       },
+    },
+    'search-placeholder': 'Search accounts by email, name, or plan...',
+    'search-clear': 'Clear search',
+    'compact-summary-toggle': 'Usage Summary',
+    'compact-summary-description':
+      'Show Antigravity limits in a clean summary like the IDE Usage popup without changing the detailed view',
+    'compact-summary': {
+      'five-hour-limit': '5h limit',
+      'weekly-limit': 'Weekly limit',
+      'gemini-models': 'Gemini Models',
+      'claude-gpt-models': 'Claude and GPT models',
+      'resets-in': 'Resets in ',
+      'percent-left': '{{percent}}% left',
+    },
+    'switch-conflict-dialog': {
+      title: 'Close Running Antigravity Windows',
+      description:
+        'Antigravity has multiple windows or background processes still open, so switching accounts cannot proceed safely. Close the processes below or close all of them and retry.',
+      'description-with-account':
+        'Antigravity has multiple windows or background processes still open, so switching to {{email}} cannot proceed safely. Close the processes below or close all of them and retry.',
+      'running-count': 'Running processes: {{count}}',
+      refresh: 'Refresh',
+      'all-closed': 'All Antigravity processes are closed. You can retry switching now.',
+      'isolated-profile': 'Isolated profile: {{path}}',
+      'default-profile': 'Default profile',
+      'close-one': 'Close',
+      'retry-switch': 'Retry Switch',
+      'close-all-and-retry': 'Close All & Retry',
     },
     toast: {
       validationLinkFailed: {

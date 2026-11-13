@@ -8,7 +8,7 @@ describe('published release metadata', () => {
       tagName: 'v1.2.3',
       body,
       publishedAt: '2026-10-08T00:00:00Z',
-      url: 'https://github.com/Draculabo/AntigravityManager/releases/tag/v1.2.3',
+      url: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/v1.2.3',
     };
     expect(JSON.parse(JSON.stringify(buildUpdaterMetadata(release)))).toEqual({
       version: '1.2.3',
@@ -24,13 +24,13 @@ describe('published release metadata', () => {
         tagName: 'v1.2.3',
         body: null,
         publishedAt: '2026-10-08T00:00:00Z',
-        url: 'https://github.com/Draculabo/AntigravityManager/releases/tag/v1.2.3',
+        url: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/v1.2.3',
       }),
     ).toEqual({
       version: '1.2.3',
       notes: '',
       pub_date: '2026-10-08T00:00:00Z',
-      url: 'https://github.com/Draculabo/AntigravityManager/releases/tag/v1.2.3',
+      url: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/v1.2.3',
     });
   });
 
@@ -40,7 +40,7 @@ describe('published release metadata', () => {
         tagName: 'v1.2.3',
         body: 'Changes',
         publishedAt: null,
-        url: 'https://github.com/Draculabo/AntigravityManager/releases/tag/v1.2.4',
+        url: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/v1.2.4',
       }),
     ).toThrow('Release URL does not match');
   });

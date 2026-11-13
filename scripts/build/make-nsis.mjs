@@ -12,9 +12,11 @@ if (arch !== 'x64' && arch !== 'arm64') {
   throw new Error('Usage: pnpm run make:nsis <x64|arm64> [packaged-app]');
 }
 
+const proPackaged = path.join('out', `Antigravity Manager Pro-win32-${arch}`);
+const defaultPackaged = path.join('out', `Antigravity Manager-win32-${arch}`);
 const packaged = path.resolve(
   projectRoot,
-  process.argv[3] || path.join('out', `Antigravity Manager-win32-${arch}`),
+  process.argv[3] || (existsSync(path.resolve(projectRoot, proPackaged)) ? proPackaged : defaultPackaged),
 );
 const resources = path.join(packaged, 'resources');
 assert(existsSync(path.join(resources, 'app.asar')), 'Forge packaged app is required first');
@@ -23,7 +25,7 @@ assert(
   'Packaged executable is missing',
 );
 
-const feedUrl = `https://raw.githubusercontent.com/Draculabo/AntigravityManager/release-updates/nsis/win32/${arch}`;
+const feedUrl = 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/latest/download';
 writeFileSync(
   path.join(resources, 'app-update.yml'),
   YAML.stringify({
@@ -71,7 +73,7 @@ if (run.status !== 0) {
 }
 
 const version = JSON.parse(readFileSync(path.join(projectRoot, 'package.json'), 'utf8')).version;
-const exeName = `Antigravity.Manager-${version}-windows-${arch}-nsis.exe`;
+const exeName = `Antigravity.Manager.Pro-${version}-windows-${arch}-nsis.exe`;
 const exe = path.join(output, exeName);
 const metadata = path.join(output, 'latest.yml');
 assert(existsSync(exe), `NSIS installer is missing: ${exe}`);

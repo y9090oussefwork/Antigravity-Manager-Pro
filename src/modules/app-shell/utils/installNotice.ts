@@ -1,6 +1,6 @@
 import path from 'path';
 
-export type InstallNoticeLanguage = 'zh-CN' | 'en' | 'ru' | 'vi' | 'fr' | 'pt-BR';
+export type InstallNoticeLanguage = 'zh-CN' | 'en' | 'ru' | 'vi' | 'fr' | 'pt-BR' | 'ar-EG';
 
 const installNoticeText: Record<
   InstallNoticeLanguage,
@@ -53,6 +53,13 @@ const installNoticeText: Record<
     detailPrefix: 'Emplacement d installation : ',
     buttons: ['Ouvrir le dossier d installation', 'OK'],
   },
+  'ar-EG': {
+    title: 'شغّل التطبيق من قائمة ابدأ (Start)',
+    message:
+      'لاحظنا إن التطبيق شغال من مسار مش مسار التثبيت. عشان التحديثات التلقائية تشتغل صح، شغله من قائمة ابدأ أو اختصار سطح المكتب. لو مفيش اختصار، شغّل ملف التثبيت تاني.',
+    detailPrefix: 'مكان التثبيت: ',
+    buttons: ['فتح فولدر التثبيت', 'فهمت'],
+  },
 };
 
 export function resolveInstallNoticeLanguage({
@@ -86,6 +93,10 @@ export function resolveInstallNoticeLanguage({
 
   if (normalized.startsWith('fr')) {
     return 'fr';
+  }
+
+  if (normalized.startsWith('ar')) {
+    return 'ar-EG';
   }
 
   return 'en';

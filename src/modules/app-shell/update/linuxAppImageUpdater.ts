@@ -18,7 +18,7 @@ type ActionResult =
   | { status: 'error'; message: string };
 
 const RELEASE_DOWNLOAD_URL =
-  'https://github.com/Draculabo/AntigravityManager/releases/latest/download';
+  'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/latest/download';
 let updater: AppImageUpdater | null = null;
 let installTarget: string | null = null;
 let notifyUpdate: NotifyUpdate | null = null;

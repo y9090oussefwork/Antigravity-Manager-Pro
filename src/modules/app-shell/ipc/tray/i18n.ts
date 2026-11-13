@@ -94,6 +94,18 @@ const tr: TrayTexts = {
   forbidden: 'Hesap Yasaklandı',
 };
 
+const ar: TrayTexts = {
+  current: 'الحالي',
+  quota: 'الحصة',
+  switch_next: 'التبديل للحساب الجاي',
+  refresh_current: 'تحديث الحصة الحالية',
+  show_window: 'إظهار الشباك الرئيسي',
+  quit: 'إغلاق التطبيق',
+  no_account: 'مفيش حساب',
+  unknown_quota: 'مش معروف',
+  forbidden: 'الحساب محظور',
+};
+
 export function getTrayTexts(lang: string = 'en'): TrayTexts {
   if (lang.startsWith('zh')) {
     return zh;
@@ -112,6 +124,9 @@ export function getTrayTexts(lang: string = 'en'): TrayTexts {
   }
   if (lang.startsWith('tr')) {
     return tr;
+  }
+  if (lang.startsWith('ar')) {
+    return ar;
   }
   return en;
 }

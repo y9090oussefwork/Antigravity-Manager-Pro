@@ -1,5 +1,5 @@
 const GITHUB_ORIGIN = 'https://github.com';
-const REPOSITORY_PATH = '/Draculabo/AntigravityManager';
+const REPOSITORY_PATH = '/y9090oussefwork/Antigravity-Manager-Pro';
 
 export function isTrustedExternalUrl(url: string): boolean {
   try {

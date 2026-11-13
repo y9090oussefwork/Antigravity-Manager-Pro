@@ -106,7 +106,7 @@ describe('AppImage updater lifecycle', () => {
     await setup();
     expect(instance().feed).toEqual({
       provider: 'generic',
-      url: 'https://github.com/Draculabo/AntigravityManager/releases/latest/download',
+      url: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/latest/download',
     });
   });
 

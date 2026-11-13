@@ -22,7 +22,7 @@ import {
   isMasterKeyUnavailableError,
 } from '@/shared/utils/errorMessages';
 
-const GITHUB_REPOSITORY_URL = 'https://github.com/Draculabo/AntigravityManager';
+const GITHUB_REPOSITORY_URL = 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro';
 
 interface CloudAccountLoadErrorProps {
   error?: unknown;

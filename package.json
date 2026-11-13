@@ -2,8 +2,8 @@
   "name": "antigravity-manager",
   "version": "0.30.0",
   "private": true,
-  "productName": "Antigravity Manager",
-  "description": "Antigravity Manager - Electron App",
+  "productName": "Antigravity Manager Pro",
+  "description": "Antigravity Manager Pro - Open-source desktop manager for Antigravity accounts, quota monitoring, isolated workspaces, and local proxy gateway",
   "main": ".vite/build/main.js",
   "engines": {
     "node": ">=24.22.0 <25",

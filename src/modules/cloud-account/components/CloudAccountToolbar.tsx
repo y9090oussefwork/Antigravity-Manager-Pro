@@ -8,11 +8,14 @@ import {
   LayoutList,
   List,
   RefreshCcw,
+  Search,
   SortAsc,
+  X,
   Zap,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,6 +56,8 @@ interface CloudAccountToolbarProps {
   quotaWindow: QuotaWindow;
   quotaGroupVisibility: QuotaGroupVisibility;
   isMinimalMode: boolean;
+  compactQuotaSummary?: boolean;
+  searchQuery?: string;
   getTierOptionLabel: (key: string, label: string) => string;
   onToggleAutoSwitch: (checked: boolean) => void;
   onForcePoll: () => void;
@@ -63,6 +68,8 @@ interface CloudAccountToolbarProps {
   onQuotaWindowChange: (quotaWindow: QuotaWindow) => void;
   onQuotaGroupVisibilityChange: (value: QuotaGroupVisibility) => void;
   onToggleMinimalMode: (enabled: boolean) => void;
+  onToggleCompactQuotaSummary?: (enabled: boolean) => void;
+  onSearchQueryChange?: (value: string) => void;
 }
 
 export function CloudAccountToolbar({
@@ -80,6 +87,8 @@ export function CloudAccountToolbar({
   quotaWindow,
   quotaGroupVisibility,
   isMinimalMode,
+  compactQuotaSummary = false,
+  searchQuery = '',
   getTierOptionLabel,
   onToggleAutoSwitch,
   onForcePoll,
@@ -90,6 +99,8 @@ export function CloudAccountToolbar({
   onQuotaWindowChange,
   onQuotaGroupVisibilityChange,
   onToggleMinimalMode,
+  onToggleCompactQuotaSummary,
+  onSearchQueryChange,
 }: CloudAccountToolbarProps) {
   const { t } = useTranslation();
 
@@ -144,6 +155,28 @@ export function CloudAccountToolbar({
           !isMinimalMode ? 'border-t' : ''
         }`}
       >
+        <div className="relative min-w-[190px] flex-1 sm:max-w-[260px]">
+          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 start-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+          <Input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => onSearchQueryChange?.(event.target.value)}
+            placeholder={t('cloud.search-placeholder')}
+            aria-label={t('cloud.search-placeholder')}
+            className="h-8 ps-8 pe-7 text-xs"
+          />
+          {searchQuery ? (
+            <button
+              type="button"
+              onClick={() => onSearchQueryChange?.('')}
+              aria-label={t('cloud.search-clear')}
+              className="text-muted-foreground hover:text-foreground absolute top-1/2 end-2 -translate-y-1/2"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+        </div>
+
         <CloudAccountSelectAllButton visibleAccountIds={visibleAccountIds} />
         <AccountTierFilterDropdown
           options={tierOptions}
@@ -201,6 +234,22 @@ export function CloudAccountToolbar({
             checked={isMinimalMode}
             onCheckedChange={onToggleMinimalMode}
             aria-label={t('cloud.minimal-mode')}
+          />
+        </div>
+
+        <div className="flex items-center gap-2 rounded-lg border px-2 py-1">
+          <Label
+            htmlFor="compact-quota-summary"
+            className="cursor-pointer text-xs font-medium select-none"
+            title={t('cloud.compact-summary-description')}
+          >
+            {t('cloud.compact-summary-toggle')}
+          </Label>
+          <Switch
+            id="compact-quota-summary"
+            checked={compactQuotaSummary}
+            onCheckedChange={onToggleCompactQuotaSummary}
+            aria-label={t('cloud.compact-summary-toggle')}
           />
         </div>
 

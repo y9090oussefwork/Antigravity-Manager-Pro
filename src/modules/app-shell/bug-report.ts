@@ -3,7 +3,7 @@ import { redactDiagnosticText } from '@/shared/observability/sentryPrivacy';
 import bugReportTemplate from '../../../.github/ISSUE_TEMPLATE/bug_report.md?raw';
 
 export const BUG_REPORT_URL =
-  'https://github.com/Draculabo/AntigravityManager/issues/new?template=bug_report.md';
+  'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/issues/new?template=bug_report.md';
 
 /** Keep report text out of the URL; users review, paste and submit it themselves. */
 export function buildErrorBugReport(

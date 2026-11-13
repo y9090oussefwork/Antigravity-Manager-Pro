@@ -28,7 +28,7 @@ const update: ManualUpdateInfo = {
   version: '1.2.3',
   tagName: 'v1.2.3',
   releaseName: 'v1.2.3',
-  releaseUrl: 'https://github.com/Draculabo/AntigravityManager/releases/tag/v1.2.3',
+  releaseUrl: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/v1.2.3',
   platform: 'win32',
   source: 'electron-updater',
   state: 'downloading',
@@ -183,7 +183,7 @@ describe('release-notes notification flow', () => {
     await waitFor(() =>
       expect(openReleaseNotesLink.mock.calls.map(([input]) => input)).toEqual([
         { url: update.releaseUrl },
-        { url: 'https://github.com/Draculabo/AntigravityManager/releases' },
+        { url: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases' },
       ]),
     );
   });

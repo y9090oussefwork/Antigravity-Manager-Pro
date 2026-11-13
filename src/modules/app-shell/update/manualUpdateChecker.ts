@@ -22,15 +22,15 @@ import { getAppSetting, setAppSetting } from '@/shared/persistence/appSettingsSt
 import { logger } from '@/shared/logging/logger';
 
 const LATEST_RELEASE_API_URL =
-  'https://api.github.com/repos/Draculabo/AntigravityManager/releases/latest';
+  'https://api.github.com/repos/y9090oussefwork/Antigravity-Manager-Pro/releases/latest';
 const LATEST_RELEASE_UPDATER_JSON_URL =
-  'https://github.com/Draculabo/AntigravityManager/releases/latest/download/updater.json';
+  'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/latest/download/updater.json';
 const LATEST_RELEASE_REDIRECT_URL =
-  'https://github.com/Draculabo/AntigravityManager/releases/latest';
+  'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/latest';
 const GITHUB_RAW_PACKAGE_JSON_URL =
-  'https://raw.githubusercontent.com/Draculabo/AntigravityManager/main/package.json';
+  'https://raw.githubusercontent.com/y9090oussefwork/Antigravity-Manager-Pro/main/package.json';
 const JSDELIVR_PACKAGE_JSON_URL =
-  'https://cdn.jsdelivr.net/gh/Draculabo/AntigravityManager@main/package.json';
+  'https://cdn.jsdelivr.net/gh/y9090oussefwork/Antigravity-Manager-Pro@main/package.json';
 const MANUAL_UPDATE_SNOOZE_KEY = 'manual_update_snooze';
 const MANUAL_UPDATE_MOCK_VERSION = '9.9.9';
 const MANUAL_UPDATE_TIMEOUT_MS = 15_000;
@@ -160,7 +160,7 @@ export async function checkManualUpdate(currentVersion: string): Promise<ManualU
         version: MANUAL_UPDATE_MOCK_VERSION,
         tagName: `v${MANUAL_UPDATE_MOCK_VERSION}`,
         releaseName: 'Mock Release',
-        releaseUrl: `https://github.com/Draculabo/AntigravityManager/releases/tag/v${MANUAL_UPDATE_MOCK_VERSION}`,
+        releaseUrl: `https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/v${MANUAL_UPDATE_MOCK_VERSION}`,
         platform,
       },
     };

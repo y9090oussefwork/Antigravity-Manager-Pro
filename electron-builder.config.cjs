@@ -5,8 +5,8 @@ if (arch !== 'x64' && arch !== 'arm64') {
 }
 
 module.exports = {
-  appId: 'com.draculabo.antigravitymanager',
-  productName: 'Antigravity Manager',
+  appId: 'com.y9090oussefwork.antigravitymanagerpro',
+  productName: 'Antigravity Manager Pro',
   directories: {
     output: process.env.AGM_NSIS_OUTPUT || `out/make/nsis/${arch}`,
   },
@@ -18,12 +18,12 @@ module.exports = {
   nsis: {
     oneClick: true,
     perMachine: false,
-    artifactName: `Antigravity.Manager-${'${version}'}-windows-${arch}-nsis.exe`,
+    artifactName: `Antigravity.Manager.Pro-${'${version}'}-windows-${arch}-nsis.exe`,
   },
   publish: [
     {
       provider: 'generic',
-      url: `https://raw.githubusercontent.com/Draculabo/AntigravityManager/release-updates/nsis/win32/${arch}`,
+      url: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/latest/download',
     },
   ],
 };

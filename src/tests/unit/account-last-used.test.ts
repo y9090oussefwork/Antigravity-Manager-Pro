@@ -9,11 +9,13 @@ describe('account last-used time', () => {
     vi.setSystemTime(new Date('2026-10-05T00:00:00Z'));
     const timestamp = Date.now() / 1000 - 120;
     expect({
+      arabic: formatAccountLastUsed(timestamp, 'ar-EG'),
       chinese: formatAccountLastUsed(timestamp, 'zh-CN'),
       english: formatAccountLastUsed(timestamp, 'en-US'),
       portuguese: formatAccountLastUsed(timestamp, 'pt-BR'),
       unsupported: formatAccountLastUsed(timestamp, 'other'),
     }).toEqual({
+      arabic: 'منذ دقيقتين',
       chinese: '2 分钟前',
       english: '2 minutes ago',
       portuguese: 'há 2 minutos',

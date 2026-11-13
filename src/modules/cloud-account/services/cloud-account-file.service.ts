@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { logger } from '@/shared/logging/logger';
 import { writeFileAtomic } from '@/shared/persistence/atomic-json-file';
 import { CloudAccountFileError } from './cloud-account-file.error';
 import { exportCloudAccounts, importCloudAccounts } from './cloud-account-file-policy.service';
@@ -64,7 +65,8 @@ export async function exportCloudAccountFile(
     const content = await exportCloudAccounts(stripTokens);
     await writeFileAtomic(filePath, content, { mode: 0o600 });
     return { status: 'saved' };
-  } catch {
+  } catch (error) {
+    logger.error('[CloudAccountFile] Export failed:', error);
     throw new CloudAccountFileError('write-failed');
   }
 }

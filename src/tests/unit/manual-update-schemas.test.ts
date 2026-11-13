@@ -11,7 +11,7 @@ describe('manual update response schemas', () => {
     expect(
       GitHubReleaseSchema.safeParse({
         draft: false,
-        html_url: 'https://github.com/Draculabo/AntigravityManager/releases/tag/v1.2.3',
+        html_url: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/v1.2.3',
         name: null,
         prerelease: false,
         tag_name: 'v1.2.3',

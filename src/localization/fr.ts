@@ -548,6 +548,8 @@ const fr = {
       turkish: 'Turc',
       french: 'Français',
       portuguese: 'Portugais (Brésil)',
+      japanese: 'Japonais',
+      arabicEgyptian: 'Arabe (Égypte)',
     },
     about: {
       title: 'A propos',
@@ -1100,6 +1102,35 @@ const fr = {
           'Signalez ce problème sur GitHub. Cliquez pour copier les informations et ouvrir le formulaire.',
         openRepository: 'Ouvrir le depot GitHub',
       },
+    },
+    'search-placeholder': 'Rechercher par e-mail, nom ou offre...',
+    'search-clear': 'Effacer la recherche',
+    'compact-summary-toggle': 'Résumé des limites',
+    'compact-summary-description':
+      'Afficher les limites Antigravity sous forme de résumé compact sans modifier la vue détaillée',
+    'compact-summary': {
+      'five-hour-limit': 'Limite 5 h',
+      'weekly-limit': 'Limite hebdomadaire',
+      'gemini-models': 'Modèles Gemini',
+      'claude-gpt-models': 'Modèles Claude et GPT',
+      'resets-in': 'Réinitialisation dans ',
+      'percent-left': '{{percent}}% restant',
+    },
+    'switch-conflict-dialog': {
+      title: 'Fermer les fenêtres Antigravity ouvertes',
+      description:
+        'Antigravity a plusieurs fenêtres ou processus en arrière-plan encore ouverts. Fermez les processus ci-dessous ou fermez-les tous puis réessayez.',
+      'description-with-account':
+        'Antigravity a plusieurs fenêtres ou processus en arrière-plan encore ouverts, empêchant le basculement vers {{email}}. Fermez les processus ci-dessous ou fermez-les tous puis réessayez.',
+      'running-count': 'Processus en cours : {{count}}',
+      refresh: 'Actualiser',
+      'all-closed':
+        'Tous les processus Antigravity sont fermés. Vous pouvez réessayer de basculer.',
+      'isolated-profile': 'Profil isolé : {{path}}',
+      'default-profile': 'Profil par défaut',
+      'close-one': 'Fermer',
+      'retry-switch': 'Réessayer',
+      'close-all-and-retry': 'Tout fermer et réessayer',
     },
     toast: {
       validationLinkFailed: {

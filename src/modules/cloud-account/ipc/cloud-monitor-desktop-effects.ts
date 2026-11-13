@@ -8,7 +8,7 @@ import type { CloudAccount } from '../types';
 import { CloudMonitorService } from '../services/CloudMonitorService';
 import { AutoSwitchService } from '../services/AutoSwitchService';
 import { switchCloudAccountForDesktop } from './cloud-account-switch-desktop';
-type CloudMonitorLanguage = 'en' | 'zh-CN' | 'ru' | 'vi' | 'fr' | 'tr' | 'pt-BR';
+type CloudMonitorLanguage = 'en' | 'zh-CN' | 'ru' | 'vi' | 'fr' | 'tr' | 'pt-BR' | 'ar-EG';
 
 const CLOUD_MONITOR_NOTIFICATION_TEXT: Record<
   CloudMonitorLanguage,
@@ -60,6 +60,12 @@ const CLOUD_MONITOR_NOTIFICATION_TEXT: Record<
     lowQuotaBody: (email, models) => `${email}: ${models} için kota düşük`,
     lowAICreditsTitle: 'Düşük AI Kredisi Uyarısı',
     lowAICreditsBody: (email, credits) => `${email}: AI kredi bakiyesi düşük (${credits})`,
+  },
+  'ar-EG': {
+    lowQuotaTitle: 'تنبيه انخفاض الحصة',
+    lowQuotaBody: (email, models) => `${email}: حصة ${models} قربت تخلص`,
+    lowAICreditsTitle: 'تنبيه انخفاض رصيد الـ AI',
+    lowAICreditsBody: (email, credits) => `${email}: رصيد الـ AI قليل (${credits})`,
   },
 };
 

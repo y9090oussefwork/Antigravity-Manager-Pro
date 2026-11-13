@@ -61,7 +61,7 @@ export async function getReleaseNotes(
 
   try {
     const release = await http.requestJson(
-      `https://api.github.com/repos/Draculabo/AntigravityManager/releases/tags/${encodeURIComponent(tagName)}`,
+      `https://api.github.com/repos/y9090oussefwork/Antigravity-Manager-Pro/releases/tags/${encodeURIComponent(tagName)}`,
       {
         operation: 'release-notes-github-api',
         responseSchema: GitHubReleaseNotesSchema,

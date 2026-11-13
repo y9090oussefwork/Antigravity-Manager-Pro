@@ -101,7 +101,9 @@ export function createAtomicFileWriter(
 const defaultAtomicFileWriter = createAtomicFileWriter({
   platform: process.platform,
   async mkdir(directory: string): Promise<void> {
-    await fs.promises.mkdir(directory, { recursive: true });
+    if (!fs.existsSync(directory)) {
+      await fs.promises.mkdir(directory, { recursive: true });
+    }
   },
   openFile(filePath: string, mode?: number): Promise<AtomicFileHandle> {
     return fs.promises.open(filePath, 'wx', mode);
@@ -155,7 +157,9 @@ export function writeFileAtomicSync(
   const temporaryPath = createTemporaryPath(filePath);
   let descriptor: number | null = null;
 
-  fs.mkdirSync(directory, { recursive: true });
+  if (!fs.existsSync(directory)) {
+    fs.mkdirSync(directory, { recursive: true });
+  }
   try {
     descriptor = fs.openSync(temporaryPath, 'wx', options.mode);
     fs.writeFileSync(descriptor, content, 'utf-8');

@@ -7,6 +7,7 @@ import tr from '@/localization/tr';
 import vi from '@/localization/vi';
 import zh from '@/localization/zh-CN';
 import ptBr from '@/localization/pt-BR';
+import arEg from '@/localization/ar-EG';
 
 describe('desktop startup error texts', () => {
   it.each([
@@ -16,6 +17,7 @@ describe('desktop startup error texts', () => {
     ['tr-TR', tr],
     ['vi-VN', vi],
     ['pt-BR', ptBr],
+    ['ar-EG', arEg],
     ['de-DE', en],
   ])('loads the %s fallback without the renderer translator', async (language, resource) => {
     for (const kind of [

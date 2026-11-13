@@ -14,6 +14,7 @@ import {
   useForcePollCloudMonitor,
 } from '@/modules/cloud-account/hooks/useCloudAccounts';
 import { IdentityProfileDialog } from '@/modules/identity-profile/components/IdentityProfileDialog';
+import { SwitchProcessConflictDialog } from '@/modules/cloud-account/components/SwitchProcessConflictDialog';
 import type { CloudAccountView } from '@/modules/cloud-account/services/cloud-account-view';
 import type { AntigravityAppTarget } from '@/shared/platform/antigravityAppTarget';
 import { useToast } from '@/components/ui/use-toast';
@@ -52,6 +53,10 @@ import {
   readMinimalModePreference,
   saveMinimalModePreference,
 } from '@/modules/cloud-account/utils/minimal-mode-preference';
+import {
+  readCompactQuotaSummaryPreference,
+  saveCompactQuotaSummaryPreference,
+} from '@/modules/cloud-account/utils/compact-quota-preference';
 
 export function CloudAccountList() {
   return (
@@ -84,6 +89,11 @@ function CloudAccountListContent() {
 
   const { toast } = useToast();
   const lastLoadErrorToastAtRef = useRef<number>(0);
+  const [switchConflict, setSwitchConflict] = useState<{
+    accountId: string;
+    appTarget?: AntigravityAppTarget;
+    email?: string;
+  } | null>(null);
 
   const gridLayout: GridLayout = (config?.grid_layout as GridLayout) || 'auto';
   const [quotaWindow, setQuotaWindow] = useState<QuotaWindow>(() =>
@@ -107,6 +117,15 @@ function CloudAccountListContent() {
   useEffect(() => {
     saveMinimalModePreference(() => window.localStorage, isMinimalMode);
   }, [isMinimalMode]);
+
+  const [compactQuotaSummary, setCompactQuotaSummary] = useState<boolean>(() =>
+    readCompactQuotaSummaryPreference(() => window.localStorage),
+  );
+  useEffect(() => {
+    saveCompactQuotaSummaryPreference(() => window.localStorage, compactQuotaSummary);
+  }, [compactQuotaSummary]);
+
+  const [searchQuery, setSearchQuery] = useState('');
 
   const updateGridLayout = async (layout: GridLayout) => {
     if (config) {
@@ -133,8 +152,30 @@ function CloudAccountListContent() {
     effectiveWeeklyQuotaStatus,
   } = useCloudAccountListView(accounts, config, currentSort);
 
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const filteredAccounts = useMemo(() => {
+    if (!normalizedSearchQuery) {
+      return sortedAccounts;
+    }
+    return sortedAccounts.filter((account) => {
+      const email = account.email?.toLowerCase() ?? '';
+      const name = account.name?.toLowerCase() ?? '';
+      const tier = account.quota?.subscription_tier?.toLowerCase() ?? '';
+      return (
+        email.includes(normalizedSearchQuery) ||
+        name.includes(normalizedSearchQuery) ||
+        tier.includes(normalizedSearchQuery)
+      );
+    });
+  }, [sortedAccounts, normalizedSearchQuery]);
+
+  const filteredVisibleAccountIds = useMemo(
+    () => (normalizedSearchQuery ? filteredAccounts.map((account) => account.id) : visibleAccountIds),
+    [filteredAccounts, normalizedSearchQuery, visibleAccountIds],
+  );
+
   const { refreshSelectedAccounts, deleteSelectedAccounts } = useCloudAccountBatchActions({
-    visibleAccountIds,
+    visibleAccountIds: filteredVisibleAccountIds,
     refreshMutation,
     deleteMutation,
   });
@@ -230,11 +271,24 @@ function CloudAccountListContent() {
             description: t('cloud.toast.switched.description'),
           }),
         onError: (err) => {
+          const diagnostic = readFinalizedOperationDiagnostic(err);
           const switchCode = readCloudAccountSwitchErrorCode(err) ?? 'switch-failed';
+          if (
+            switchCode === 'process-close-failed' ||
+            diagnostic?.reason === 'process-close-failed'
+          ) {
+            const targetAccount = accounts?.find((item) => item.id === id);
+            setSwitchConflict({
+              accountId: id,
+              appTarget,
+              email: targetAccount?.email,
+            });
+            return;
+          }
           toast({
             error: err,
             title: t('cloud.toast.switchFailed'),
-            description: readFinalizedOperationDiagnostic(err)
+            description: diagnostic
               ? getLocalizedErrorMessage(err, t)
               : t(`cloud.toast.switchFailureCodes.${switchCode}`),
             variant: 'destructive',
@@ -364,7 +418,7 @@ function CloudAccountListContent() {
       />
 
       <CloudAccountToolbar
-        visibleAccountIds={visibleAccountIds}
+        visibleAccountIds={filteredVisibleAccountIds}
         autoSwitchEnabled={autoSwitchEnabled}
         isSettingsLoading={isSettingsLoading}
         isSetAutoSwitchPending={setAutoSwitchMutation.isPending}
@@ -378,6 +432,8 @@ function CloudAccountListContent() {
         quotaWindow={quotaWindow}
         quotaGroupVisibility={quotaGroupVisibility}
         isMinimalMode={isMinimalMode}
+        compactQuotaSummary={compactQuotaSummary}
+        searchQuery={searchQuery}
         getTierOptionLabel={getTierOptionLabel}
         onToggleAutoSwitch={handleToggleAutoSwitch}
         onForcePoll={handleForcePoll}
@@ -396,15 +452,18 @@ function CloudAccountListContent() {
         onQuotaWindowChange={setQuotaWindow}
         onQuotaGroupVisibilityChange={setQuotaGroupVisibility}
         onToggleMinimalMode={setIsMinimalMode}
+        onToggleCompactQuotaSummary={setCompactQuotaSummary}
+        onSearchQueryChange={setSearchQuery}
       />
 
       <CloudAccountGrid
-        accounts={sortedAccounts}
+        accounts={filteredAccounts}
         sourceAccountCount={accounts?.length ?? 0}
         gridLayout={gridLayout}
         quotaWindow={quotaWindow}
         quotaGroupVisibility={quotaGroupVisibility}
         isMinimalMode={isMinimalMode}
+        compactQuotaSummary={compactQuotaSummary}
         manualRecommendation={manualRecommendation}
         hasActiveTierFilter={hasActiveTierFilter}
         refreshingAccountId={refreshingAccountId}
@@ -421,7 +480,7 @@ function CloudAccountListContent() {
       />
 
       <CloudAccountBatchActionBar
-        visibleAccountIds={visibleAccountIds}
+        visibleAccountIds={filteredVisibleAccountIds}
         onRefreshSelected={refreshSelectedAccounts}
         onDeleteSelected={deleteSelectedAccounts}
       />
@@ -433,6 +492,25 @@ function CloudAccountListContent() {
           if (!nextOpen) {
             setIdentityAccount(null);
           }
+        }}
+      />
+
+      <SwitchProcessConflictDialog
+        open={Boolean(switchConflict)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            setSwitchConflict(null);
+          }
+        }}
+        target={switchConflict?.appTarget}
+        accountEmail={switchConflict?.email}
+        onRetrySwitch={() => {
+          if (!switchConflict) {
+            return;
+          }
+          const pending = switchConflict;
+          setSwitchConflict(null);
+          handleSwitch(pending.accountId, pending.appTarget);
         }}
       />
     </div>

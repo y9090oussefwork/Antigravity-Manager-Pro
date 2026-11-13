@@ -10,6 +10,7 @@ export const OwnerNotificationLanguageSchema = z.enum([
   'fr',
   'tr',
   'pt-BR',
+  'ar-EG',
 ]);
 export type OwnerNotificationLanguage = z.infer<typeof OwnerNotificationLanguageSchema>;
 export const OwnerNotificationModelSchema = z

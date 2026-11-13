@@ -8,8 +8,8 @@ import type {
 } from './types';
 
 const MANUAL_UPDATE_SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
-const RELEASE_TAG_URL_PREFIX = 'https://github.com/Draculabo/AntigravityManager/releases/tag/';
-const RELEASE_TAG_PATH_PREFIX = '/Draculabo/AntigravityManager/releases/tag/';
+const RELEASE_TAG_URL_PREFIX = 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/';
+const RELEASE_TAG_PATH_PREFIX = '/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/';
 
 interface BuildManualUpdateInfoInput {
   currentVersion: string;

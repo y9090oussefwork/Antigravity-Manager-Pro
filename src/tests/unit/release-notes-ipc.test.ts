@@ -29,7 +29,7 @@ describe('release-note IPC operations', () => {
 
   it('validates external destinations before opening the browser', async () => {
     openExternal.mockResolvedValue(undefined);
-    const url = 'https://github.com/Draculabo/AntigravityManager/compare/v1.0.0...v1.2.3';
+    const url = 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/compare/v1.0.0...v1.2.3';
     expect(await client.openReleaseNotesLink({ url })).toEqual({ status: 'opened' });
     expect(await client.openReleaseNotesLink({ url: 'https://other.example' })).toEqual({
       status: 'error',

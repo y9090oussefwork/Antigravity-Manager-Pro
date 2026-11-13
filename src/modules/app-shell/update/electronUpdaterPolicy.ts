@@ -1,6 +1,6 @@
 import type { ManualUpdateInfo, ManualUpdatePlatform, UpdateNotificationState } from './types';
 
-const RELEASE_TAG_URL_PREFIX = 'https://github.com/Draculabo/AntigravityManager/releases/tag/';
+const RELEASE_TAG_URL_PREFIX = 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/';
 
 interface BuildElectronUpdaterNotificationInput {
   state: UpdateNotificationState;

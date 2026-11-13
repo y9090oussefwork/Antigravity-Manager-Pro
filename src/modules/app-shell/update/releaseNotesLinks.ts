@@ -1,4 +1,4 @@
-export const RELEASE_REPOSITORY_URL = 'https://github.com/Draculabo/AntigravityManager';
+export const RELEASE_REPOSITORY_URL = 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro';
 export const RELEASE_HISTORY_URL = `${RELEASE_REPOSITORY_URL}/releases`;
 
 const GITHUB_ROUTES = new Set([
@@ -51,8 +51,8 @@ export function isReleaseNotesLink(url: string): boolean {
       return false;
     }
     if (
-      pathname === '/Draculabo/AntigravityManager' ||
-      pathname.startsWith('/Draculabo/AntigravityManager/')
+      pathname === '/y9090oussefwork/Antigravity-Manager-Pro' ||
+      pathname.startsWith('/y9090oussefwork/Antigravity-Manager-Pro/')
     ) {
       return true;
     }

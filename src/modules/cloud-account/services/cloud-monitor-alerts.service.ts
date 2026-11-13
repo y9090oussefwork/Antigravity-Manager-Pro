@@ -15,6 +15,9 @@ function notificationLanguage(language: string): OwnerNotificationLanguage {
   if (normalized.startsWith('pt')) {
     return 'pt-BR';
   }
+  if (normalized.startsWith('ar')) {
+    return 'ar-EG';
+  }
   for (const value of ['ru', 'vi', 'fr', 'tr'] as const) {
     if (normalized.startsWith(value)) {
       return value;

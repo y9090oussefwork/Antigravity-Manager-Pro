@@ -30,6 +30,9 @@ export async function getDesktopStartupErrorTexts(
     case 'vi':
       resource = await import('@/localization/vi');
       break;
+    case 'ar':
+      resource = await import('@/localization/ar-EG');
+      break;
     default:
       resource = await import('@/localization/en');
   }

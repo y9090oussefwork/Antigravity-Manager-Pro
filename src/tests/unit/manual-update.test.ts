@@ -15,7 +15,7 @@ describe('manual update policy', () => {
       release: {
         tag_name: 'v1.3.0',
         name: 'Antigravity Manager 1.3.0',
-        html_url: 'https://github.com/Draculabo/AntigravityManager/releases/tag/v1.3.0',
+        html_url: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/v1.3.0',
         draft: false,
         prerelease: false,
       },
@@ -25,7 +25,7 @@ describe('manual update policy', () => {
       version: '1.3.0',
       tagName: 'v1.3.0',
       releaseName: 'Antigravity Manager 1.3.0',
-      releaseUrl: 'https://github.com/Draculabo/AntigravityManager/releases/tag/v1.3.0',
+      releaseUrl: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/v1.3.0',
       platform: 'darwin',
     });
   });
@@ -37,7 +37,7 @@ describe('manual update policy', () => {
       release: {
         tag_name: 'v1.3.0',
         name: 'Antigravity Manager 1.3.0',
-        html_url: 'https://github.com/Draculabo/AntigravityManager/releases/tag/v1.3.0',
+        html_url: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/v1.3.0',
         draft: false,
         prerelease: false,
       },
@@ -54,7 +54,7 @@ describe('manual update policy', () => {
       release: {
         tag_name: '1.2.3',
         name: 'Antigravity Manager 1.2.3',
-        html_url: 'https://github.com/Draculabo/AntigravityManager/releases/tag/1.2.3',
+        html_url: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/1.2.3',
         draft: false,
         prerelease: false,
       },
@@ -66,7 +66,7 @@ describe('manual update policy', () => {
   it('ignores draft, prerelease, and invalid SemVer releases', () => {
     const baseRelease = {
       name: 'Antigravity Manager',
-      html_url: 'https://github.com/Draculabo/AntigravityManager/releases/latest',
+      html_url: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/latest',
     };
 
     expect(
@@ -138,13 +138,13 @@ describe('manual update policy', () => {
       version: '0.17.0',
       notes: 'See release page.',
       pub_date: '2026-06-10T12:00:00Z',
-      url: 'https://github.com/Draculabo/AntigravityManager/releases/tag/v0.17.0',
+      url: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/v0.17.0',
     });
 
     expect(release).toEqual({
       tag_name: 'v0.17.0',
       name: 'v0.17.0',
-      html_url: 'https://github.com/Draculabo/AntigravityManager/releases/tag/v0.17.0',
+      html_url: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/v0.17.0',
       draft: false,
       prerelease: false,
     });
@@ -155,19 +155,19 @@ describe('manual update policy', () => {
 
     expect(release?.tag_name).toBe('v0.18.0');
     expect(release?.html_url).toBe(
-      'https://github.com/Draculabo/AntigravityManager/releases/tag/v0.18.0',
+      'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/v0.18.0',
     );
   });
 
   it('normalizes GitHub latest redirect URL into release metadata', () => {
     const release = buildGitHubReleaseFromLatestRedirect(
-      'https://github.com/Draculabo/AntigravityManager/releases/tag/v0.19.0',
+      'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/v0.19.0',
     );
 
     expect(release?.tag_name).toBe('v0.19.0');
     expect(
       buildGitHubReleaseFromLatestRedirect(
-        'https://github.com/Draculabo/AntigravityManager/releases/latest',
+        'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/latest',
       ),
     ).toBeNull();
   });

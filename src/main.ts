@@ -24,6 +24,7 @@ import {
   isRunningFromExpectedInstallDir as isRunningFromExpectedInstallDirUtil,
   resolveInstallNoticeLanguage,
 } from './modules/app-shell/utils/installNotice';
+import { isWindowsNsisInstall } from './modules/app-shell/update/windowsNsisInstall';
 import { applyStartupGpuSwitches } from '@/modules/app-shell/utils/startupGpuSwitches';
 import { initializeDesktopAccountSecurity } from '@/modules/app-shell/services/account-security-startup';
 import {
@@ -127,9 +128,39 @@ function logPacket(data: unknown) {
     }
   }
 }
+let activeLanguage: string | null = null;
+let hasFinishedMainLoad = false;
+let installNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleWindowsInstallNotice() {
+  if (hasShownInstallNotice) {
+    return;
+  }
+  if (activeLanguage) {
+    if (installNoticeTimer) {
+      clearTimeout(installNoticeTimer);
+      installNoticeTimer = null;
+    }
+    showWindowsInstallNoticeIfNeeded();
+    return;
+  }
+  if (!installNoticeTimer) {
+    installNoticeTimer = setTimeout(() => {
+      installNoticeTimer = null;
+      showWindowsInstallNoticeIfNeeded();
+    }, 1000);
+  }
+}
+
 ipcMain.on(IPC_CHANNELS.CHANGE_LANGUAGE, (event, lang) => {
   logger.info(`IPC: Received CHANGE_LANGUAGE: ${lang}`);
+  if (typeof lang === 'string' && lang.trim()) {
+    activeLanguage = lang;
+  }
   setTrayLanguage(lang);
+  if (hasFinishedMainLoad) {
+    scheduleWindowsInstallNotice();
+  }
 });
 
 const gpuSwitchResult = applyStartupGpuSwitches(app, process.platform, process.env);
@@ -195,6 +226,14 @@ let updateInstallRequested = false;
 const notifiedManualUpdateVersions = new Set<string>();
 
 function isRunningFromExpectedInstallDir() {
+  if (
+    process.platform === 'win32' &&
+    app.isPackaged &&
+    isWindowsNsisInstall(process.execPath, process.resourcesPath)
+  ) {
+    return true;
+  }
+
   return isRunningFromExpectedInstallDirUtil({
     platform: process.platform,
     isPackaged: app.isPackaged,
@@ -224,26 +263,37 @@ function showWindowsInstallNoticeIfNeeded() {
 
   hasShownInstallNotice = true;
   const language = resolveInstallNoticeLanguage({
-    configLanguage: startupConfig?.language,
+    configLanguage: activeLanguage ?? startupConfig?.language,
     locale: app.getLocale(),
   });
   const text = getInstallNoticeText(language);
 
-  const options: MessageBoxOptions = {
-    type: 'info',
-    title: text.title,
-    message: text.message,
-    detail: `${text.detailPrefix}${expectedRoot}`,
-    buttons: [...text.buttons],
-    defaultId: 1,
-  };
+  const hasExpectedRoot = fs.existsSync(expectedRoot);
+  const options: MessageBoxOptions = hasExpectedRoot
+    ? {
+        type: 'info',
+        title: text.title,
+        message: text.message,
+        detail: `${text.detailPrefix}${expectedRoot}`,
+        buttons: [...text.buttons],
+        defaultId: 1,
+        cancelId: 1,
+      }
+    : {
+        type: 'info',
+        title: text.title,
+        message: text.message,
+        buttons: [text.buttons[1]],
+        defaultId: 0,
+        cancelId: 0,
+      };
 
   const showPromise = globalMainWindow
     ? dialog.showMessageBox(globalMainWindow, options)
     : dialog.showMessageBox(options);
 
   showPromise.then(({ response }) => {
-    if (response === 0) {
+    if (hasExpectedRoot && response === 0 && fs.existsSync(expectedRoot)) {
       shell.openPath(expectedRoot);
     }
   });
@@ -534,7 +584,6 @@ function createWindow({ startHidden }: { startHidden: boolean }) {
   }
 
   logger.info('Window created');
-  showWindowsInstallNoticeIfNeeded();
 
   mainWindow.on('close', (event) => {
     if (!isQuitting) {
@@ -575,6 +624,8 @@ function createWindow({ startHidden }: { startHidden: boolean }) {
 
   mainWindow.webContents.on('did-finish-load', () => {
     logger.info('Page finished loading successfully');
+    hasFinishedMainLoad = true;
+    scheduleWindowsInstallNotice();
   });
 
   mainWindow.webContents.on('console-message', (details) => {

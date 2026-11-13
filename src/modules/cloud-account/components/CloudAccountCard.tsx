@@ -68,6 +68,7 @@ import {
 } from '@/modules/cloud-account/utils/quota-group-visibility';
 import type { QuotaWindow } from '@/modules/cloud-account/utils/quota-groups';
 import { DetailedQuotaDisplay } from '@/modules/cloud-account/components/DetailedQuotaDisplay';
+import { CompactQuotaSummary } from '@/modules/cloud-account/components/CompactQuotaSummary';
 import { AccountQuotaWindowSections } from '@/modules/cloud-account/components/AccountQuotaWindowSections';
 import {
   CompactModelQuotaDisplay,
@@ -233,6 +234,7 @@ interface CloudAccountCardProps {
   quotaWindow?: QuotaWindow;
   quotaGroupVisibility?: QuotaGroupVisibility;
   isMinimalMode?: boolean;
+  compactQuotaSummary?: boolean;
   onRefresh: (id: string) => void;
   onDelete: (id: string) => void;
   onSwitch: (id: string, appTarget?: AntigravityAppTarget) => void;
@@ -253,6 +255,7 @@ export function CloudAccountCard({
   quotaWindow = 'both',
   quotaGroupVisibility = DEFAULT_QUOTA_GROUP_VISIBILITY,
   isMinimalMode = false,
+  compactQuotaSummary = false,
   onRefresh,
   onDelete,
   onSwitch,
@@ -853,6 +856,8 @@ export function CloudAccountCard({
           <div className="border-destructive/30 bg-destructive/5 text-destructive rounded-md border p-3 text-xs">
             {t('cloud.card.serviceBlockedNotice')}
           </div>
+        ) : compactQuotaSummary ? (
+          <CompactQuotaSummary quota={account.quota} />
         ) : (
           <div className="space-y-2">
             <AccountQuotaWindowSections
@@ -1015,6 +1020,7 @@ interface CompactCloudAccountCardProps {
   quotaWindow?: QuotaWindow;
   quotaGroupVisibility?: QuotaGroupVisibility;
   isMinimalMode?: boolean;
+  compactQuotaSummary?: boolean;
   onRefresh: (id: string) => void;
   onDelete: (id: string) => void;
   onSwitch: (id: string, appTarget?: AntigravityAppTarget) => void;
@@ -1034,6 +1040,7 @@ export function CompactCloudAccountCard({
   quotaWindow = 'both',
   quotaGroupVisibility = DEFAULT_QUOTA_GROUP_VISIBILITY,
   isMinimalMode = false,
+  compactQuotaSummary = false,
   onRefresh,
   onDelete,
   onSwitch,
@@ -1254,6 +1261,8 @@ export function CompactCloudAccountCard({
           <div className="border-destructive/30 bg-destructive/5 text-destructive rounded-md border px-2.5 py-1 text-xs">
             {t('cloud.card.serviceBlockedNotice')}
           </div>
+        ) : compactQuotaSummary ? (
+          <CompactQuotaSummary quota={account.quota} />
         ) : (
           <AccountQuotaWindowSections
             quotaWindow={quotaWindow}

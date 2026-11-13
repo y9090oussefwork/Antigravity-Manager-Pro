@@ -37,15 +37,15 @@ export async function exportCloudAccounts(stripTokens = false): Promise<string> 
     accounts: accounts.map((account) => ({
       provider: account.provider,
       email: account.email,
-      name: account.name,
-      avatar_url: account.avatar_url,
+      name: account.name ?? null,
+      avatar_url: account.avatar_url ?? null,
       token: stripTokens ? undefined : account.token,
-      quota: account.quota,
-      device_profile: account.device_profile,
-      device_history: account.device_history,
-      proxy_url: account.proxy_url ?? null,
-      status: account.status,
-      status_reason: account.status_reason,
+      quota: account.quota ?? undefined,
+      device_profile: account.device_profile ?? undefined,
+      device_history: account.device_history ?? undefined,
+      proxy_url: account.proxy_url || null,
+      status: account.status ?? undefined,
+      status_reason: account.status_reason ?? undefined,
     })),
   };
 
