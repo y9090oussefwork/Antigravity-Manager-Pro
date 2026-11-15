@@ -1,5 +1,7 @@
 # Antigravity Manager Pro
 
+[**Download for Windows**](https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/latest) · [Website and switching guide](https://y9090oussefwork.github.io/Antigravity-Manager-Pro/) · [التحميل والشرح بالعربي](https://y9090oussefwork.github.io/Antigravity-Manager-Pro/ar/)
+
 **Antigravity Manager Pro** is an open-source desktop application (Electron + React + NestJS/Fastify) for managing Google accounts across Antigravity clients (`Classic`, `Antigravity IDE`, and `agy` CLI), monitoring model quotas in real time, running isolated per-project workspaces, and connecting AI coding tools through a local API gateway.
 
 > **Open-Source Fork & Attribution:**
@@ -93,6 +95,8 @@ The built Windows installer and update metadata (`latest.yml`, `.blockmap`) are 
 
 - [y9090oussefwork](https://github.com/y9090oussefwork) maintains Antigravity Manager Pro.
 - ChatGPT and Gemini assisted with development.
+
+If the app helps you, star the repository using **Star** at the top of this page. To follow releases, choose **Watch → Custom → Releases**.
 
 ## License
 
