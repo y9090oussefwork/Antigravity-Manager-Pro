@@ -1,0 +1,79 @@
+import { describe, expect, it } from 'vitest';
+import type { CloudQuotaModelInfo } from '@/modules/cloud-account/types';
+import {
+  FALLBACK_PROXY_EXAMPLE_MODELS,
+  buildProxyExampleModels,
+  disambiguateModelList,
+  isImageProxyExampleModel,
+  isProxyExampleModelVisible,
+} from '@/modules/proxy-gateway/components/proxy-example-models';
+
+function quota(displayName?: string): CloudQuotaModelInfo {
+  return {
+    percentage: 100,
+    resetTime: '',
+    display_name: displayName,
+  };
+}
+
+describe('proxy example models', () => {
+  it('keeps dynamic quota models first, normalizes prefixes, and deduplicates ids', () => {
+    const models = buildProxyExampleModels([
+      {
+        quota: {
+          models: {
+            'models/vendor-preview': quota(),
+            'gemini-3-flash': quota(),
+          },
+        },
+      },
+      {
+        quota: {
+          models: {
+            'VENDOR-PREVIEW': quota('Vendor Preview'),
+          },
+        },
+      },
+    ]);
+
+    expect(models).toEqual([
+      { id: 'vendor-preview', name: 'Vendor Preview' },
+      { id: 'gemini-3-flash', name: 'gemini-3-flash' },
+      ...FALLBACK_PROXY_EXAMPLE_MODELS.filter((model) => model.id !== 'gemini-3-flash'),
+    ]);
+  });
+
+  it('uses the complete fallback list when no account quota is available', () => {
+    expect(buildProxyExampleModels([])).toEqual(FALLBACK_PROXY_EXAMPLE_MODELS);
+  });
+
+  it('detects image variants without depending on a fixed suffix', () => {
+    expect([
+      isImageProxyExampleModel('gemini-3-pro-image'),
+      isImageProxyExampleModel('gemini-3-pro-image-4k-16x9'),
+      isImageProxyExampleModel('gemini-3.5-flash-high'),
+    ]).toEqual([true, true, false]);
+  });
+
+  it('matches model visibility by normalized id and keeps missing entries visible', () => {
+    expect([
+      isProxyExampleModelVisible('gemini-3.7-flash', { 'models/Gemini-3.7-Flash': false }),
+      isProxyExampleModelVisible('claude-sonnet-4-6', {
+        'models/Gemini-3.7-Flash': false,
+      }),
+    ]).toEqual([false, true]);
+  });
+
+  it('disambiguates colliding display names with their model id', () => {
+    const colliding = [
+      { id: 'gemini-2.5-flash', name: 'Gemini 3.5 Flash Lite' },
+      { id: 'gemini-2.5-flash-lite', name: 'Gemini 3.5 Flash Lite' },
+      { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro' },
+    ];
+    expect(disambiguateModelList(colliding)).toEqual([
+      { id: 'gemini-2.5-flash', name: 'Gemini 3.5 Flash Lite (gemini-2.5-flash)' },
+      { id: 'gemini-2.5-flash-lite', name: 'Gemini 3.5 Flash Lite (gemini-2.5-flash-lite)' },
+      { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro' },
+    ]);
+  });
+});
