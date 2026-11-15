@@ -13,6 +13,17 @@ afterEach(() => {
 });
 
 describe('Windows client update guard', () => {
+  it.each(['classic', 'ide'] as const)(
+    'blocks %s for the shared stable installer name observed in official downloads',
+    async (target) => {
+      query.mockResolvedValue([
+        { pid: 10, name: `AntigravitySetup-stable-${'a'.repeat(40)}.exe`, cmd: [], startTime: 1n },
+      ]);
+      await expect(assertNoWindowsUpdate(target)).rejects.toMatchObject({
+        messageKey: 'process-runtime.update-in-progress',
+      });
+    },
+  );
   it.each(['Antigravity-x64.exe', 'Antigravity-arm64.exe'])(
     'blocks Classic startup during %s',
     async (name) => {

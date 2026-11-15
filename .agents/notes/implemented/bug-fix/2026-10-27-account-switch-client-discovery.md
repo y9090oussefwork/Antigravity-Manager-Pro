@@ -143,6 +143,20 @@ normal switch path before this review-only guard; no live updater was deliberate
 An installer spawned between the final snapshot and taskkill remains subject to the same
 non-atomic OS observation limitation as other tree changes.
 
+The November missing-IDE report exposed an installer-name coverage gap. Locally observed,
+valid Google-signed Classic and IDE packages both use `AntigravitySetup-stable-<40-hex-commit>.exe`.
+That name blocks both targets rather than guessing the product from the basename. Close-time
+snapshots inspect installers outside the captured tree too: a detached updater surviving the
+main must not authorize credential writes or restart. Existing explicit product names retain
+their target separation. Automatic relocation of the installer's `_` directory was rejected;
+repair belongs to the signed installer, not account switching.
+
+Four added regressions failed against the previous implementation: both targets admitted the
+shared installer at preflight, and close returned success with an updater remaining after main
+exit for both original and detached parent IDs. The repaired focused seven-file suite passed
+149 tests. This establishes simulated process-observation behavior, not atomic exclusion of
+Windows updates or proof that the Manager caused the reported installation damage.
+
 ## Electron and history follow-up
 
 The current-source Electron owner passed all twelve checks: Classic and IDE cloud A-B-A and

@@ -15,6 +15,7 @@ const runFile = promisify(execFile);
 
 interface TreeProcess {
   pid: number;
+  name?: string;
   parentPid?: number;
   executablePath?: string;
   startTime?: bigint;
@@ -55,6 +56,7 @@ export async function stopWindowsClientForSwitch(
       }
       return rows.map((row) => ({
         pid: row.pid,
+        name: row.name,
         parentPid: row.parentPid,
         executablePath: row.exe,
         startTime: row.startTime,
@@ -71,6 +73,7 @@ export async function stopWindowsClientForSwitch(
     }
     return rows.map((row) => ({
       pid: row.pid,
+      name: row.name,
       parentPid: row.ppid,
       executablePath: row.executablePath ? toWslPath(row.executablePath) : undefined,
       startTime: row.startTime,
@@ -106,6 +109,18 @@ export async function stopWindowsClientForSwitch(
     }
   }
   const collect = (rows: TreeProcess[]) => {
+    // An updater can outlive or detach from the main process during normal close.
+    // Check the whole snapshot before treating an empty captured tree as safe to write.
+    if (
+      rows.some(
+        (row) =>
+          (row.name && isAntigravityWindowsInstaller(row.name, context.target)) ||
+          (row.executablePath &&
+            isAntigravityWindowsInstaller(path.win32.basename(row.executablePath), context.target)),
+      )
+    ) {
+      throw processError('update-in-progress');
+    }
     const current = new Map(
       rows.flatMap((row) => {
         const previous = tracked.get(row.pid);

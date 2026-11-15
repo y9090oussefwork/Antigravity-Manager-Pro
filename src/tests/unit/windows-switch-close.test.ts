@@ -245,6 +245,45 @@ it('does not force a client tree after an update installer appears during normal
   expect(commands).toEqual([]);
 });
 
+it.each([421, 1])(
+  'blocks a stable updater with parent %s after normal close',
+  async (parentPid) => {
+    rows = [main];
+    mocks.close.mockImplementation(async () => {
+      rows = [
+        { ...child, parentPid, exe: `C:\\Updates\\AntigravitySetup-stable-${'a'.repeat(40)}.exe` },
+      ];
+    });
+    const pending = stopWindowsClientForSwitch(context, [root], 500).then(
+      () => ({ ok: true }),
+      (error: unknown) => ({ ok: false, error }),
+    );
+    await vi.advanceTimersByTimeAsync(500);
+    expect(await pending).toMatchObject({
+      ok: false,
+      error: { messageKey: 'process-runtime.update-in-progress' },
+    });
+    expect(commands).toEqual([]);
+  },
+);
+
+it('blocks a named installer even when its executable metadata is unavailable', async () => {
+  mocks.read.mockResolvedValue([
+    main,
+    {
+      pid: 500,
+      parentPid: 1,
+      name: `AntigravitySetup-stable-${'a'.repeat(40)}.exe`,
+      startTime: 12n,
+    },
+  ]);
+  await expect(stopWindowsClientForSwitch(context, [root], 500)).rejects.toMatchObject({
+    messageKey: 'process-runtime.update-in-progress',
+  });
+  expect(mocks.close).not.toHaveBeenCalled();
+  expect(commands).toEqual([]);
+});
+
 it('fails when forced termination is denied and the captured process survives', async () => {
   mocks.close.mockRejectedValue(processError('no-closable-window'));
   mocks.exec.mockImplementation((_file, args, _options, callback) => {

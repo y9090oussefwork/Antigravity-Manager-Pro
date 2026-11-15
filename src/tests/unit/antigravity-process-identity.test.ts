@@ -1,8 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { isTargetAntigravityProcessCandidate } from '@/shared/platform/paths';
-import { isAntigravityHelperProcess } from '@/shared/platform/antigravityProcessIdentity';
+import {
+  isAntigravityHelperProcess,
+  isAntigravityWindowsInstaller,
+} from '@/shared/platform/antigravityProcessIdentity';
 
 describe('Windows installer process identity', () => {
+  it.each(['classic', 'ide'] as const)('recognizes shared stable installers for %s', (target) => {
+    expect(
+      isAntigravityWindowsInstaller(`AntigravitySetup-stable-${'a'.repeat(40)}.exe`, target),
+    ).toBe(true);
+  });
+  it.each([
+    'Antigravity.exe',
+    'Antigravity IDE.exe',
+    'AntigravitySetup-stable-not-a-hash.exe',
+    'OtherSetup.exe',
+  ])('does not classify %s as an updater', (name) => {
+    expect(isAntigravityWindowsInstaller(name)).toBe(false);
+  });
   it.each([
     ['Antigravity-x64.exe', 'classic'],
     ['Antigravity-arm64.exe', 'classic'],

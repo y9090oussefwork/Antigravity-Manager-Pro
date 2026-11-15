@@ -3,6 +3,10 @@ export function isAntigravityWindowsInstaller(
   processName: string,
   target?: 'classic' | 'ide',
 ): boolean {
+  // Both official products use this download name; it cannot identify one target safely.
+  if (/^antigravitysetup-stable-[a-f0-9]{40}\.exe$/i.test(processName)) {
+    return true;
+  }
   const match = /^antigravity([ -]ide)?(?:setup)?-(?:x64|arm64)(?:-\d[\w.-]*)?\.exe$/i.exec(
     processName,
   );

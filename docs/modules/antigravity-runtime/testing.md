@@ -353,6 +353,10 @@ reparented children, reused identities, failed or expired probes, conflicts, den
 It also covers transient descendant metadata before normal close and after reparenting, and
 rejects persistent unreadability without treating a captured process as exited.
 An updater appearing below the client during normal close aborts before any forced termination.
+The official `AntigravitySetup-stable-<40-hex-commit>.exe` name is shared by Classic and IDE,
+so either target blocks while it is observed. `runtime-windows-update` covers preflight;
+`windows-switch-close` also rejects detached installers after the captured main exits, before
+returning permission to write credentials. Ordinary client names remain eligible for switching.
 The observer suite includes PID 0 and creation-time parsing from a complete WSL CIM snapshot.
 `runtime-preflight` runs the production preflight and observer together. It covers a partial
 Windows process snapshot that becomes readable after the status-query deadline, the shared
