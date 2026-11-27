@@ -213,12 +213,20 @@
   !insertmacro agmStartStage "activate-version" "$(agmActivate)"
 
   SetOutPath "$PLUGINSDIR"
-  ClearErrors
   ${If} $agmPrevious == "1"
-    Rename "$INSTDIR" "$agmWorkspace\previous"
-    ${If} ${Errors}
-      !insertmacro agmFailInstall "previous-directory-in-use" "Setup cannot move the existing installation. Check for files in use and try again."
-    ${EndIf}
+    Var /GLOBAL agmRenameAttempts
+    StrCpy $agmRenameAttempts 0
+    agm_retry_rename_previous:
+      ClearErrors
+      Rename "$INSTDIR" "$agmWorkspace\previous"
+      ${If} ${Errors}
+        IntOp $agmRenameAttempts $agmRenameAttempts + 1
+        ${If} $agmRenameAttempts < 10
+          Sleep 300
+          Goto agm_retry_rename_previous
+        ${EndIf}
+        !insertmacro agmFailInstall "previous-directory-in-use" "Setup cannot move the existing installation. Check for files in use and try again."
+      ${EndIf}
   ${Else}
     # .onInit creates the destination. Only an empty, unregistered directory can be replaced.
     ${If} ${FileExists} "$INSTDIR\*.*"

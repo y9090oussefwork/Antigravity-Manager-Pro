@@ -11,6 +11,8 @@
   !macroend
 
   !macro customInit
+    # Release $INSTDIR set in .onInit before UAC_RunElevated holds the outer wrapper open.
+    SetOutPath "$TEMP"
     StrCpy $agmDesktopShortcutChoice "1"
     ${if} ${isNoDesktopShortcut}
       StrCpy $agmDesktopShortcutChoice "0"
