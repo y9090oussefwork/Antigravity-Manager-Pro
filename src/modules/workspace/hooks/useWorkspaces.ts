@@ -68,6 +68,7 @@ export function useCreateWorkspace(): UseMutationResult<
     mutationFn: createWorkspace,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: WORKSPACE_QUERY_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: ['cloudAccounts'] });
     },
   });
 }
@@ -83,7 +84,9 @@ export function useUpdateWorkspace(): UseMutationResult<
     mutationFn: updateWorkspace,
     onSettled: (_updated, _error, input) => {
       queryClient.invalidateQueries({ queryKey: WORKSPACE_QUERY_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: ['cloudAccounts'] });
       queryClient.invalidateQueries({ queryKey: WORKSPACE_QUERY_KEYS.detail(input.id) });
+      queryClient.invalidateQueries({ queryKey: ['cloudAccounts'] });
     },
   });
 }
@@ -101,6 +104,7 @@ export function useDeleteWorkspace(): UseMutationResult<void, Error, DeleteWorks
     mutationFn: ({ id, cleanUserDataDir, force }) => deleteWorkspace(id, cleanUserDataDir, force),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: WORKSPACE_QUERY_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: ['cloudAccounts'] });
     },
   });
 }
@@ -128,6 +132,7 @@ export function useLaunchWorkspace(): UseMutationResult<LaunchWorkspaceResult, E
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: WORKSPACE_QUERY_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: ['cloudAccounts'] });
     },
   });
 }
@@ -157,6 +162,7 @@ export function useStopWorkspace(): UseMutationResult<void, Error, string> {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: WORKSPACE_QUERY_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: ['cloudAccounts'] });
     },
   });
 }

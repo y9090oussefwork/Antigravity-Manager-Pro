@@ -11,6 +11,7 @@ import type { WorkspaceProfile } from '@/modules/workspace/types';
 import {
   classifyWorkspaceAccountStatus,
   filterWorkspaceAccountsByStatus,
+  getWorkspaceAccountMinQuotaPercentage,
   getWorkspaceAccountStatusCounts,
 } from '@/modules/workspace/utils/workspace-account-status';
 import { getProfilesBaseDir } from '@/shared/platform/paths';
@@ -241,5 +242,177 @@ describe('workspace multi-account support', () => {
     ]);
     expect(switchWorkspaceAccount).toHaveBeenCalledTimes(1);
     expect(switchWorkspaceAccount).toHaveBeenCalledWith(runningWorkspace.id, 'acc-pool-high');
+  });
+
+  it('computes effective workspace quota from quota_groups without falsely treating Argon 0% as exhausted', () => {
+    const proWithArgonZero = makeViewAccount('acc-pro', {
+      quota: {
+        subscription_tier: 'pro',
+        models: {
+          'gemini-4-argon-high': { percentage: 0, resetTime: '2026-12-01T00:00:00Z' },
+          'gemini-3.8-flash-high': { percentage: 100, resetTime: '2026-12-01T00:00:00Z' },
+          'claude-sonnet-5-5-high': { percentage: 100, resetTime: '2026-12-01T00:00:00Z' },
+        },
+        quota_groups: [
+          {
+            display_name: 'Gemini Models',
+            buckets: [
+              {
+                bucket_id: 'gemini-weekly',
+                window: 'weekly',
+                remaining_fraction: 0.76,
+                reset_time: '2026-12-03T00:00:00Z',
+              },
+              {
+                bucket_id: 'gemini-5h',
+                window: '5h',
+                remaining_fraction: 1,
+                reset_time: '2026-11-28T00:00:00Z',
+              },
+            ],
+          },
+          {
+            display_name: 'Claude and GPT models',
+            buckets: [
+              {
+                bucket_id: '3p-weekly',
+                window: 'weekly',
+                remaining_fraction: 1,
+                reset_time: '2026-12-04T00:00:00Z',
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const depletedGroupAccount = makeViewAccount('acc-group-low', {
+      quota: {
+        subscription_tier: 'free',
+        models: {
+          'gemini-3.8-flash-high': { percentage: 100, resetTime: '2026-12-01T00:00:00Z' },
+        },
+        quota_groups: [
+          {
+            display_name: 'Gemini Models',
+            buckets: [
+              {
+                bucket_id: 'gemini-weekly',
+                window: 'weekly',
+                remaining_fraction: 0.01,
+                reset_time: '2026-12-03T00:00:00Z',
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const noGroupArgonZero = makeViewAccount('acc-no-groups', {
+      quota: {
+        subscription_tier: 'pro',
+        models: {
+          'gemini-4-argon-high': { percentage: 0, resetTime: '2026-12-01T00:00:00Z' },
+          'gemini-3.8-flash-high': { percentage: 85, resetTime: '2026-12-01T00:00:00Z' },
+        },
+      },
+    });
+
+    expect(getWorkspaceAccountMinQuotaPercentage(proWithArgonZero.quota)).toBe(76);
+    expect(classifyWorkspaceAccountStatus(proWithArgonZero, 'other-active')).toBe('available');
+
+    expect(getWorkspaceAccountMinQuotaPercentage(depletedGroupAccount.quota)).toBe(1);
+    expect(classifyWorkspaceAccountStatus(depletedGroupAccount, 'other-active')).toBe('exhausted');
+
+    expect(getWorkspaceAccountMinQuotaPercentage(noGroupArgonZero.quota)).toBe(85);
+    expect(classifyWorkspaceAccountStatus(noGroupArgonZero, 'other-active')).toBe('available');
+  });
+
+  it('uses quota_groups threshold in default workspace auto-switch detector', async () => {
+    const runningWorkspace: WorkspaceProfile = {
+      id: '44444444-4444-4444-8444-444444444444',
+      name: 'AutoSwitch Default Check',
+      accountId: 'acc-argon-only-zero',
+      accountIds: ['acc-argon-only-zero', 'acc-healthy'],
+      autoSwitchEnabled: true,
+      projectPath: '/tmp/ws-default',
+      userDataDir: '/tmp/profiles/ws-default',
+      createdAt: 1,
+      lastLaunchedAt: null,
+    };
+
+    const healthyAccount: CloudAccount = {
+      ...makeCoreAccount('acc-healthy', 100),
+      quota: {
+        subscription_tier: 'pro',
+        models: {
+          'gemini-4-argon-high': { percentage: 0, resetTime: '2026-12-01T00:00:00Z' },
+          'gemini-3.8-flash-high': { percentage: 100, resetTime: '2026-12-01T00:00:00Z' },
+        },
+        quota_groups: [
+          {
+            display_name: 'Gemini Models',
+            buckets: [
+              {
+                bucket_id: 'gemini-weekly',
+                window: 'weekly',
+                remaining_fraction: 0.7,
+                reset_time: '2026-12-03T00:00:00Z',
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const activeStillHealthy: CloudAccount = {
+      ...healthyAccount,
+      id: 'acc-argon-only-zero',
+      email: 'acc-argon-only-zero@example.com',
+    };
+
+    const switchWorkspaceAccount = vi.fn(async () => undefined);
+    const noSwitch = await checkAndSwitchWorkspacesIfNeeded({
+      listProfiles: async () => [runningWorkspace],
+      getStatuses: async () => [{ running: true, pid: 200 }],
+      getAccounts: async () => [activeStillHealthy, healthyAccount],
+      isOAuthBlocked: () => false,
+      switchWorkspaceAccount,
+    });
+    expect(noSwitch).toEqual([]);
+    expect(switchWorkspaceAccount).not.toHaveBeenCalled();
+
+    const activeGroupDepleted: CloudAccount = {
+      ...activeStillHealthy,
+      quota: {
+        subscription_tier: 'pro',
+        models: { 'gemini-3.8-flash-high': { percentage: 100, resetTime: '2026-12-01T00:00:00Z' } },
+        quota_groups: [
+          {
+            display_name: 'Gemini Models',
+            buckets: [
+              {
+                bucket_id: 'gemini-5h',
+                window: '5h',
+                remaining_fraction: 0,
+                reset_time: '2026-11-28T00:00:00Z',
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    const switched = await checkAndSwitchWorkspacesIfNeeded({
+      listProfiles: async () => [runningWorkspace],
+      getStatuses: async () => [{ running: true, pid: 200 }],
+      getAccounts: async () => [activeGroupDepleted, healthyAccount],
+      isOAuthBlocked: () => false,
+      switchWorkspaceAccount,
+    });
+    expect(switched).toEqual([
+      {
+        workspaceId: runningWorkspace.id,
+        fromAccountId: 'acc-argon-only-zero',
+        toAccountId: 'acc-healthy',
+      },
+    ]);
   });
 });

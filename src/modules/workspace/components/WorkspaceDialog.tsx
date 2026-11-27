@@ -17,13 +17,16 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
-  classifyAccountModelCategory,
+  resolveAccountModelCategory,
   type AccountModelCategory,
 } from '@/modules/cloud-account/utils/account-model-category';
+
 import {
   classifyWorkspaceAccountStatus,
+  formatWorkspaceAccountQuotaSummary,
   getWorkspaceAccountMinQuotaPercentage,
 } from '@/modules/workspace/utils/workspace-account-status';
+import { useAccountModelCategoryOverrides } from '@/modules/cloud-account/hooks/useAccountModelCategoryOverrides';
 import { selectWorkspaceDirectory } from '@/modules/workspace/actions/workspace';
 import type { CloudAccountView } from '@/modules/cloud-account/services/cloud-account-view';
 import type {
@@ -108,11 +111,15 @@ export const WorkspaceDialog: React.FC<WorkspaceDialogProps> = ({
   }
 
   const selectedSet = useMemo(() => new Set(accountIds), [accountIds]);
+  const { overrides: categoryOverrides } = useAccountModelCategoryOverrides();
 
   const filteredAccounts = useMemo(() => {
     const query = accountSearch.trim().toLowerCase();
     return accounts.filter((acc) => {
-      if (categoryFilter !== 'all' && classifyAccountModelCategory(acc) !== categoryFilter) {
+      if (
+        categoryFilter !== 'all' &&
+        resolveAccountModelCategory(acc, categoryOverrides) !== categoryFilter
+      ) {
         return false;
       }
       if (!query) {
@@ -122,7 +129,7 @@ export const WorkspaceDialog: React.FC<WorkspaceDialogProps> = ({
       const displayName = acc.name?.toLowerCase() ?? '';
       return email.includes(query) || displayName.includes(query);
     });
-  }, [accounts, accountSearch, categoryFilter]);
+  }, [accounts, accountSearch, categoryFilter, categoryOverrides]);
 
   const toggleAccountMembership = (id: string, checked: boolean) => {
     if (checked) {
@@ -324,8 +331,9 @@ export const WorkspaceDialog: React.FC<WorkspaceDialogProps> = ({
                       const isChecked = selectedSet.has(acc.id);
                       const isCurrentActive = acc.id === accountId;
                       const accountStatus = classifyWorkspaceAccountStatus(acc, accountId);
-                      const modelCategory = classifyAccountModelCategory(acc);
+                      const modelCategory = resolveAccountModelCategory(acc, categoryOverrides);
                       const minQuota = getWorkspaceAccountMinQuotaPercentage(acc.quota);
+                      const quotaTitle = formatWorkspaceAccountQuotaSummary(acc.quota);
 
                       return (
                         <div
@@ -368,6 +376,7 @@ export const WorkspaceDialog: React.FC<WorkspaceDialogProps> = ({
                                   </Badge>
                                 )}
                                 <span
+                                  title={quotaTitle}
                                   className={
                                     accountStatus === 'available' || accountStatus === 'active'
                                       ? 'text-success'

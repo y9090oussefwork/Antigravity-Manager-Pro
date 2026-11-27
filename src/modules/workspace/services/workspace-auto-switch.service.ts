@@ -1,6 +1,5 @@
 import { CloudAccountRepo } from '@/modules/cloud-account/persistence/cloudHandler';
 import { isAccountOAuthRecoveryBlocked } from '@/modules/cloud-account/persistence/oauth-recovery-service';
-import { AutoSwitchService } from '@/modules/cloud-account/services/AutoSwitchService';
 import type { CloudAccount } from '@/modules/cloud-account/types';
 import { logger } from '@/shared/logging/logger';
 import { WorkspaceProfileRepo } from '../persistence/workspace-profile-repo';
@@ -86,7 +85,14 @@ export async function checkAndSwitchWorkspacesIfNeeded(
       customDeps?.getStatuses ?? ((profiles) => WorkspaceLifecycleService.getStatuses(profiles)),
     getAccounts: customDeps?.getAccounts ?? (() => CloudAccountRepo.getAccounts()),
     isAccountDepleted:
-      customDeps?.isAccountDepleted ?? ((account) => AutoSwitchService.isAccountDepleted(account)),
+      customDeps?.isAccountDepleted ??
+      ((account) => {
+        if (account.status === 'rate_limited') {
+          return true;
+        }
+        const min = getWorkspaceAccountMinQuotaPercentage(account.quota);
+        return min !== null && min <= 5;
+      }),
     isOAuthBlocked: customDeps?.isOAuthBlocked ?? isAccountOAuthRecoveryBlocked,
     switchWorkspaceAccount:
       customDeps?.switchWorkspaceAccount ??

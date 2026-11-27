@@ -23,6 +23,37 @@ import type {
 } from '@/modules/workspace/types';
 import type { CloudAccountView } from '@/modules/cloud-account/services/cloud-account-view';
 
+function getQuotaObservedAt(account: CloudAccountView | undefined): number {
+  let latest = 0;
+  for (const group of account?.quota?.quota_groups ?? []) {
+    for (const bucket of group.buckets) {
+      if (bucket.observed_at && bucket.observed_at > latest) {
+        latest = bucket.observed_at;
+      }
+    }
+  }
+  return latest;
+}
+
+function pickFresherAccountView(
+  fromWorkspace: CloudAccountView | undefined,
+  fromAccountsList: CloudAccountView | undefined,
+  preferAccountsList: boolean,
+): CloudAccountView | undefined {
+  if (!fromWorkspace) {
+    return fromAccountsList;
+  }
+  if (!fromAccountsList) {
+    return fromWorkspace;
+  }
+  const wsObserved = getQuotaObservedAt(fromWorkspace);
+  const listObserved = getQuotaObservedAt(fromAccountsList);
+  if (listObserved !== wsObserved) {
+    return listObserved > wsObserved ? fromAccountsList : fromWorkspace;
+  }
+  return preferAccountsList ? fromAccountsList : fromWorkspace;
+}
+
 export interface WorkspacesViewProps {
   workspaces?: WorkspaceProfileView[];
   isLoading?: boolean;
@@ -42,10 +73,13 @@ export const WorkspacesView: React.FC<WorkspacesViewProps> = ({
 }) => {
   const { t } = useTranslation();
   const { toast } = useToast();
+  const [dialogOpen, setDialogOpen] = useState(false);
   const queryWorkspaces = useWorkspaces({ enabled: customWorkspaces === undefined });
-  const queryAccounts = useCloudAccounts(false);
+  const queryAccounts = useCloudAccounts(
+    customAccounts === undefined ? (dialogOpen ? 3_000 : 10_000) : false,
+  );
 
-  const workspaces = useMemo(
+  const rawWorkspaces = useMemo(
     () => customWorkspaces ?? queryWorkspaces.data ?? [],
     [customWorkspaces, queryWorkspaces.data],
   );
@@ -54,8 +88,56 @@ export const WorkspacesView: React.FC<WorkspacesViewProps> = ({
   const isError =
     customIsError ?? (customWorkspaces === undefined ? queryWorkspaces.isError : false);
   const error = customError ?? queryWorkspaces.error;
-  const refetch = onRefetch ?? queryWorkspaces.refetch;
-  const accounts = customAccounts ?? queryAccounts.data ?? [];
+  const rawAccounts = useMemo(
+    () => customAccounts ?? queryAccounts.data ?? [],
+    [customAccounts, queryAccounts.data],
+  );
+  const preferAccountsList = queryAccounts.dataUpdatedAt >= queryWorkspaces.dataUpdatedAt;
+
+  const { workspaces, accounts } = useMemo(() => {
+    const accountById = new Map(rawAccounts.map((acc) => [acc.id, acc]));
+    const fresherWorkspaceAccountById = new Map<string, CloudAccountView>();
+
+    const reconciledWorkspaces = rawWorkspaces.map((ws) => {
+      const reconciledAccounts = (ws.accounts ?? []).map((wsAcc) => {
+        const picked = pickFresherAccountView(wsAcc, accountById.get(wsAcc.id), preferAccountsList);
+        if (picked) {
+          fresherWorkspaceAccountById.set(picked.id, picked);
+          return picked;
+        }
+        return wsAcc;
+      });
+      const reconciledPrimary =
+        pickFresherAccountView(ws.account, accountById.get(ws.accountId), preferAccountsList) ??
+        ws.account;
+      if (reconciledPrimary) {
+        fresherWorkspaceAccountById.set(reconciledPrimary.id, reconciledPrimary);
+      }
+
+      return {
+        ...ws,
+        account: reconciledPrimary,
+        accounts: reconciledAccounts,
+      };
+    });
+
+    const reconciledAccounts = rawAccounts.map(
+      (acc) => pickFresherAccountView(fresherWorkspaceAccountById.get(acc.id), acc, true) ?? acc,
+    );
+
+    return { workspaces: reconciledWorkspaces, accounts: reconciledAccounts };
+  }, [rawWorkspaces, rawAccounts, preferAccountsList]);
+
+  const refetch = () => {
+    if (onRefetch) {
+      onRefetch();
+    } else {
+      queryWorkspaces.refetch().catch(() => undefined);
+    }
+    if (customAccounts === undefined) {
+      queryAccounts.refetch().catch(() => undefined);
+    }
+  };
 
   const createMutation = useCreateWorkspace();
   const updateMutation = useUpdateWorkspace();
@@ -64,7 +146,6 @@ export const WorkspacesView: React.FC<WorkspacesViewProps> = ({
   const stopMutation = useStopWorkspace();
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [dialogOpen, setDialogOpen] = useState(false);
   const [editingWorkspace, setEditingWorkspace] = useState<WorkspaceProfileView | null>(null);
   const [deletingWorkspace, setDeletingWorkspace] = useState<WorkspaceProfileView | null>(null);
   const [switchingState, setSwitchingState] = useState<{
@@ -128,11 +209,17 @@ export const WorkspacesView: React.FC<WorkspacesViewProps> = ({
   const handleOpenCreate = () => {
     setEditingWorkspace(null);
     setDialogOpen(true);
+    if (customAccounts === undefined) {
+      queryAccounts.refetch().catch(() => undefined);
+    }
   };
 
   const handleOpenEdit = (ws: WorkspaceProfileView) => {
     setEditingWorkspace(ws);
     setDialogOpen(true);
+    if (customAccounts === undefined) {
+      queryAccounts.refetch().catch(() => undefined);
+    }
   };
 
   const handleDialogSubmit = async (

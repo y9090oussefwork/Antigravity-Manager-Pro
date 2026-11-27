@@ -2223,6 +2223,10 @@ const en = {
       'gemini-pro': 'Gemini Pro',
       'gemini-pro-go': 'Gemini Pro Go',
       other: 'Other',
+      auto: 'Auto',
+      'auto-option': 'Auto ({{category}})',
+      manual: 'Manual',
+      change: 'Change category',
     },
     sort: {
       recentlyUsed: 'Recently Used',

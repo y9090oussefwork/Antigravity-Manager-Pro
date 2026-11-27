@@ -2284,6 +2284,10 @@ const arEg = {
       'gemini-pro': 'Gemini Pro',
       'gemini-pro-go': 'Gemini Pro Go',
       other: 'أخرى',
+      auto: 'تلقائي',
+      'auto-option': 'تلقائي ({{category}})',
+      manual: 'يدوي',
+      change: 'تعديل التصنيف',
     },
     sort: {
       recentlyUsed: 'المستخدمة مؤخراً',

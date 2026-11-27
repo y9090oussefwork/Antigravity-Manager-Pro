@@ -2456,6 +2456,10 @@ const ptBR = {
       'gemini-pro': 'Gemini Pro',
       'gemini-pro-go': 'Gemini Pro Go',
       other: 'Outro',
+      auto: 'Automático',
+      'auto-option': 'Automático ({{category}})',
+      manual: 'Manual',
+      change: 'Alterar categoria',
     },
     sort: {
       recentlyUsed: 'Usadas Recentemente',

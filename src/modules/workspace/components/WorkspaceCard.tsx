@@ -31,6 +31,7 @@ import { useToast } from '@/components/ui/use-toast';
 import {
   classifyWorkspaceAccountStatus,
   filterWorkspaceAccountsByStatus,
+  formatWorkspaceAccountQuotaSummary,
   getWorkspaceAccountMinQuotaPercentage,
   getWorkspaceAccountStatusCounts,
   type WorkspaceAccountStatusFilter,
@@ -297,7 +298,10 @@ export const WorkspaceCard: React.FC<WorkspaceCardProps> = ({
                               {poolAcc.email}
                             </span>
                             {minQuota !== null && (
-                              <span className="text-muted-foreground shrink-0 text-[10px] tabular-nums">
+                              <span
+                                title={formatWorkspaceAccountQuotaSummary(poolAcc.quota)}
+                                className="text-muted-foreground shrink-0 text-[10px] tabular-nums"
+                              >
                                 {minQuota}%
                               </span>
                             )}

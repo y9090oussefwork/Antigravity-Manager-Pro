@@ -64,6 +64,8 @@ import {
   type AccountModelCategory,
 } from '@/modules/cloud-account/utils/account-model-category';
 
+import { useAccountModelCategoryOverrides } from '@/modules/cloud-account/hooks/useAccountModelCategoryOverrides';
+
 export function CloudAccountList() {
   return (
     <AccountSelectionProvider>
@@ -158,14 +160,20 @@ function CloudAccountListContent() {
     visibleAccountIds,
   } = useCloudAccountListView(accounts, config, currentSort);
 
+
+  const { overrides: modelCategoryOverrides } = useAccountModelCategoryOverrides();
   const categoryCounts = useMemo(
-    () => countAccountsByModelCategory(sortedAccounts),
-    [sortedAccounts],
+    () => countAccountsByModelCategory(sortedAccounts, modelCategoryOverrides),
+    [sortedAccounts, modelCategoryOverrides],
   );
 
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
   const filteredAccounts = useMemo(() => {
-    const categorized = filterAccountsByModelCategory(sortedAccounts, modelCategory);
+    const categorized = filterAccountsByModelCategory(
+      sortedAccounts,
+      modelCategory,
+      modelCategoryOverrides,
+    );
     if (!normalizedSearchQuery) {
       return categorized;
     }
@@ -179,7 +187,7 @@ function CloudAccountListContent() {
         tier.includes(normalizedSearchQuery)
       );
     });
-  }, [sortedAccounts, modelCategory, normalizedSearchQuery]);
+  }, [sortedAccounts, modelCategory, modelCategoryOverrides, normalizedSearchQuery]);
 
   const filteredVisibleAccountIds = useMemo(
     () =>

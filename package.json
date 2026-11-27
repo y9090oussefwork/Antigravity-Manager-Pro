@@ -1,6 +1,6 @@
 {
   "name": "antigravity-manager",
-  "version": "0.34.0",
+  "version": "0.34.1",
   "private": true,
   "productName": "Antigravity Manager Pro",
   "description": "Antigravity Manager Pro - Open-source desktop manager for Antigravity accounts, quota monitoring, isolated workspaces, and local proxy gateway",

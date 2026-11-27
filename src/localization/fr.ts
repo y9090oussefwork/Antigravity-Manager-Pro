@@ -1679,6 +1679,10 @@ const fr = {
       'gemini-pro': 'Gemini Pro',
       'gemini-pro-go': 'Gemini Pro Go',
       other: 'Autre',
+      auto: 'Auto',
+      'auto-option': 'Auto ({{category}})',
+      manual: 'Manuel',
+      change: 'Modifier la catégorie',
     },
     sort: {
       recentlyUsed: 'Recemment utilises',

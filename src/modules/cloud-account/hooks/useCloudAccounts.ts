@@ -67,6 +67,7 @@ export function useDeleteCloudAccount() {
     mutationFn: deleteCloudAccount,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.cloudAccounts });
+      queryClient.invalidateQueries({ queryKey: ['workspaces'] });
     },
   });
 }
@@ -86,6 +87,7 @@ export function useRefreshQuota(accounts?: readonly CloudAccountView[]) {
         },
       );
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.cloudAccounts });
+      queryClient.invalidateQueries({ queryKey: ['workspaces'] });
     },
   });
   useWeeklyResetQuotaRefresh(accounts, queryClient, mutation.mutate, mutation.isPending);
@@ -99,6 +101,7 @@ export function useSwitchCloudAccount() {
     mutationFn: switchCloudAccount,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.cloudAccounts });
+      queryClient.invalidateQueries({ queryKey: ['workspaces'] });
       queryClient.invalidateQueries({ queryKey: ['currentAccount'] });
     },
   });
@@ -180,6 +183,7 @@ export function useSetAccountProxy() {
     mutationFn: setAccountProxy,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.cloudAccounts });
+      queryClient.invalidateQueries({ queryKey: ['workspaces'] });
     },
     onError: (error) => {
       console.error('[Mutation] setAccountProxy failed:', error);
@@ -213,6 +217,7 @@ export function useImportCloudAccounts() {
     mutationFn: importCloudAccounts,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.cloudAccounts });
+      queryClient.invalidateQueries({ queryKey: ['workspaces'] });
     },
     onError: (error) => {
       console.error('[Mutation] importCloudAccounts failed:', error);

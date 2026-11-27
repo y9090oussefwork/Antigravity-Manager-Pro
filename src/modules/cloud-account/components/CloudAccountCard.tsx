@@ -36,6 +36,7 @@ import {
   TriangleAlert,
   ExternalLink,
   ChevronDown,
+  Check,
 } from 'lucide-react';
 import { formatAccountLastUsed } from '@/modules/cloud-account/utils/format-last-used';
 import { Badge } from '@/components/ui/badge';
@@ -88,6 +89,12 @@ import {
   isGeminiQuotaGroup,
   isClaudeOrGptQuotaGroup,
 } from '@/modules/cloud-account/utils/minimal-mode-preference';
+import {
+  resolveAccountModelCategoryDetails,
+  type AccountModelCategoryOverrides,
+  type ResolvedAccountModelCategory,
+} from '@/modules/cloud-account/utils/account-model-category';
+import { useAccountModelCategoryOverrides } from '@/modules/cloud-account/hooks/useAccountModelCategoryOverrides';
 
 type ModelQuotaEntry = [string, CloudQuotaModelInfo];
 type LiveModelAvailability = Awaited<
@@ -114,6 +121,98 @@ const MODEL_DISPLAY_REPLACEMENTS: Array<[string, string]> = [
   ['claude-opus-4-5-thinking', 'Claude 4.5 Opus (Thinking)'],
   ['claude-3-5-sonnet', 'Claude 3.5 Sonnet'],
 ];
+
+function AccountCategoryDropdown({
+  account,
+  overrides,
+  onSelectCategory,
+  compact = false,
+}: {
+  account: Pick<CloudAccountView, 'id' | 'quota'>;
+  overrides: AccountModelCategoryOverrides;
+  onSelectCategory: (accountId: string, category: ResolvedAccountModelCategory | 'auto') => void;
+  compact?: boolean;
+}) {
+  const { t } = useTranslation();
+  const { category, autoCategory, isManual } = resolveAccountModelCategoryDetails(
+    account,
+    overrides,
+  );
+  const categoryLabel = t(`cloud.model-category.${category}`);
+  const autoOptionLabel = t('cloud.model-category.auto-option', {
+    category: t(`cloud.model-category.${autoCategory}`),
+  });
+
+  const badgeToneClass =
+    category === 'gemini-pro'
+      ? 'border-primary/30 bg-primary/10 text-primary hover:bg-primary/15'
+      : category === 'gemini-pro-go'
+        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/15 dark:text-emerald-300'
+        : 'border-border bg-muted/60 text-muted-foreground hover:bg-muted';
+
+  const options: Array<{
+    key: ResolvedAccountModelCategory | 'auto';
+    label: string;
+    selected: boolean;
+  }> = [
+    { key: 'auto', label: autoOptionLabel, selected: !isManual },
+    {
+      key: 'gemini-pro',
+      label: t('cloud.model-category.gemini-pro'),
+      selected: isManual && category === 'gemini-pro',
+    },
+    {
+      key: 'gemini-pro-go',
+      label: t('cloud.model-category.gemini-pro-go'),
+      selected: isManual && category === 'gemini-pro-go',
+    },
+    {
+      key: 'other',
+      label: t('cloud.model-category.other'),
+      selected: isManual && category === 'other',
+    },
+  ];
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          onClick={(e) => e.stopPropagation()}
+          title={t('cloud.model-category.change')}
+          aria-label={`${t('cloud.model-category.change')}: ${categoryLabel}`}
+          className={cn(
+            'inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-sm border font-medium transition-colors',
+            badgeToneClass,
+            compact
+              ? 'h-4 px-1.5 text-[10px]'
+              : 'min-h-6 px-2 py-0 text-xs leading-[22px] tracking-normal',
+          )}
+        >
+          <span>{categoryLabel}</span>
+          {isManual && (
+            <span className="text-[10px] opacity-75">({t('cloud.model-category.manual')})</span>
+          )}
+          <ChevronDown className="h-3 w-3 opacity-70" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+        <DropdownMenuLabel className="text-xs">{t('cloud.model-category.change')}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {options.map((opt) => (
+          <DropdownMenuItem
+            key={opt.key}
+            onSelect={() => onSelectCategory(account.id, opt.key)}
+            className="flex cursor-pointer items-center justify-between gap-3 text-xs"
+          >
+            <span>{opt.label}</span>
+            {opt.selected && <Check className="text-primary h-3.5 w-3.5" />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 function formatCreditsExpiry(expiryDate: string): string {
   if (!expiryDate) {
@@ -277,6 +376,8 @@ export function CloudAccountCard({
   const toast = customToast ?? defaultToast;
   const isLaunchingRef = useRef(false);
   const [isLaunchingWorkspace, setIsLaunchingWorkspace] = useState(false);
+  const { overrides: modelCategoryOverrides, setOverride: setModelCategoryOverride } =
+    useAccountModelCategoryOverrides();
 
   const handleLaunchIsolatedIde = async () => {
     if (isLaunchingRef.current || isLaunchingWorkspace || isDeleting || isSwitching) return;
@@ -723,6 +824,11 @@ export function CloudAccountCard({
               unknownLabel={t('cloud.tierFilter.unknown')}
               className="min-h-6 rounded-sm px-2 py-0 text-xs leading-[22px] font-medium tracking-normal"
             />
+            <AccountCategoryDropdown
+              account={account}
+              overrides={modelCategoryOverrides}
+              onSelectCategory={setModelCategoryOverride}
+            />
             {recommendations?.map((recommendation) => (
               <ManualRecommendationBadge
                 key={recommendation.family}
@@ -1071,6 +1177,8 @@ export function CompactCloudAccountCard({
   const toast = customToast ?? defaultToast;
   const isLaunchingRef = useRef(false);
   const [isLaunchingWorkspace, setIsLaunchingWorkspace] = useState(false);
+  const { overrides: modelCategoryOverrides, setOverride: setModelCategoryOverride } =
+    useAccountModelCategoryOverrides();
 
   const handleLaunchIsolatedIde = async () => {
     if (isLaunchingRef.current || isLaunchingWorkspace || isDeleting || isSwitching) return;
@@ -1209,6 +1317,12 @@ export function CompactCloudAccountCard({
             account={account}
             unknownLabel={t('cloud.tierFilter.unknown')}
             className="h-4 max-w-24 px-1 text-xs"
+          />
+          <AccountCategoryDropdown
+            account={account}
+            overrides={modelCategoryOverrides}
+            onSelectCategory={setModelCategoryOverride}
+            compact
           />
         </div>
 
