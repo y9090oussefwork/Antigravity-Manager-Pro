@@ -15,6 +15,7 @@ import { GoogleLoginOperation, GoogleLoginStepError } from './google-login-opera
 import { captureTokenWriteGuard } from './cloud-account-refresh-writeback';
 import { CloudAccountRefreshContextChangedError } from './cloud-account-refresh-context';
 import { CloudAccountQuotaObservation } from './cloud-account-quota-observation';
+import { persistValidationRequiredHealth } from './cloud-account-quota-refresh.service';
 
 export class DuplicateGoogleAccountError extends GoogleLoginStepError {
   constructor(
@@ -113,6 +114,7 @@ export async function enrollGoogleAccount(
         assertCurrent();
         try {
           const quota = await GoogleAPIService.fetchQuota(storedAccount.token.access_token);
+          const validationObservation = GoogleAPIService.getValidationObservation(quota);
           assertCurrent();
           observation.accept();
           try {
@@ -135,12 +137,21 @@ export async function enrollGoogleAccount(
           await CloudAccountRepo.updateQuota(storedAccount.id, reconciled, guard);
           assertCurrent();
           storedAccount.quota = reconciled;
+          if (validationObservation) {
+            await persistValidationRequiredHealth(storedAccount, validationObservation, guard);
+            assertCurrent();
+          }
         } catch (error) {
           if (error instanceof CloudAccountRefreshContextChangedError) {
             throw error;
           }
           assertCurrent();
           observation.accept(error);
+          const validationFailure = GoogleAPIService.extractValidationFromQuotaError(error);
+          if (validationFailure) {
+            await persistValidationRequiredHealth(storedAccount, validationFailure, guard);
+            assertCurrent();
+          }
           logger.warn('Failed to fetch initial quota');
         }
       },

@@ -29,6 +29,11 @@ import { readHttpResponseEvidence } from './google-http-evidence';
 import { createUpstreamProxyAgent } from '@/modules/config/upstream-proxy-agent';
 import { isGoogleProjectConsumerDenial } from '@/shared/auth/google-project-denial';
 import { populateSyntheticArgonModels } from '@/modules/cloud-account/utils/quota-groups';
+import { normalizeTrustedGoogleValidationUrl } from '@/modules/cloud-account/utils/google-validation-url';
+import {
+  classifyForbiddenUpstreamError,
+  extractGoogleErrorDetails,
+} from '@/server/gateway/common/google-error-details';
 import type { CloudSubscriptionState } from '../types';
 import { observeSubscription } from '../utils/subscription-tier';
 
@@ -404,7 +409,19 @@ const LoadProjectResponseSchema = z.object({
     .nullish()
     .transform((value) => value ?? undefined),
   ineligibleTiers: z
-    .array(z.object({ reasonCode: z.string().optional() }))
+    .array(
+      z.object({
+        reasonCode: z.string().optional(),
+        reasonMessage: z.string().optional(),
+        tierId: z.string().optional(),
+        tierName: z.string().optional(),
+        validationErrorMessage: z.string().optional(),
+        validationUrlLinkText: z.string().optional(),
+        validationUrl: z.string().optional(),
+        validationLearnMoreLinkText: z.string().optional(),
+        validationLearnMoreUrl: z.string().optional(),
+      }),
+    )
     .nullish()
     .transform((value) => value ?? undefined),
 });
@@ -485,10 +502,73 @@ type LoadProjectResponse = z.infer<typeof LoadProjectResponseSchema>;
 type FetchModelsResponse = z.infer<typeof FetchModelsResponseSchema>;
 type QuotaSummaryResponse = z.infer<typeof QuotaSummaryResponseSchema>;
 
+export interface ValidationRequiredObservation {
+  verificationUrl?: string;
+  description?: string;
+}
+
 interface ProjectContext {
   projectId?: string;
   subscriptionTier?: string;
   subscription?: CloudSubscriptionState;
+  validation?: ValidationRequiredObservation;
+}
+
+const quotaValidationObservations = new WeakMap<QuotaData, ValidationRequiredObservation>();
+
+function mergeValidationObservations(
+  primary: ValidationRequiredObservation | undefined,
+  secondary: ValidationRequiredObservation | undefined,
+): ValidationRequiredObservation | undefined {
+  if (!primary && !secondary) {
+    return undefined;
+  }
+  return {
+    verificationUrl: primary?.verificationUrl ?? secondary?.verificationUrl,
+    description: primary?.description ?? secondary?.description,
+  };
+}
+
+function extractValidationFromProjectContext(
+  data: LoadProjectResponse,
+): ValidationRequiredObservation | undefined {
+  const ineligible = data.ineligibleTiers?.find(
+    (tier) => tier.reasonCode?.trim().toUpperCase() === 'VALIDATION_REQUIRED',
+  );
+  if (!ineligible) {
+    return undefined;
+  }
+  const description =
+    ineligible.validationErrorMessage?.trim() || ineligible.reasonMessage?.trim() || undefined;
+  return {
+    verificationUrl: normalizeTrustedGoogleValidationUrl(ineligible.validationUrl),
+    description: description?.slice(0, 500),
+  };
+}
+
+function extractValidationFromUpstreamErrorPayload(
+  responseData: unknown,
+  fallbackMessage?: string,
+): ValidationRequiredObservation | undefined {
+  const details = extractGoogleErrorDetails(responseData);
+  const body =
+    typeof responseData === 'string'
+      ? responseData
+      : responseData === undefined
+        ? fallbackMessage
+        : JSON.stringify(responseData);
+  const classification = classifyForbiddenUpstreamError({
+    details,
+    body,
+    message: fallbackMessage ?? body,
+  });
+  if (classification.kind !== 'validation_required') {
+    return undefined;
+  }
+  return {
+    verificationUrl: normalizeTrustedGoogleValidationUrl(classification.validationLink),
+    description: classification.validationDescription?.trim().slice(0, 500) || undefined,
+  };
 }
 
 function parseTokenResponse(
@@ -1022,6 +1102,7 @@ export class GoogleAPIService {
     let projectId: string | undefined;
     let subscriptionTier: string | undefined;
     let subscription: CloudSubscriptionState | undefined;
+    let validation: ValidationRequiredObservation | undefined;
     let lastError: unknown;
     const axiosOptions = proxyOptions ?? this.getAxiosOptions(proxyUrl);
 
@@ -1073,10 +1154,14 @@ export class GoogleAPIService {
         const observedSubscription = observeSubscription(data, Date.now());
         subscription = observedSubscription;
         subscriptionTier = observedSubscription.observation.tier;
+        validation = extractValidationFromProjectContext(data);
         break;
       }
 
-      lastError = new Error(`HTTP ${response.status}: ${responseDataToText(response.data)}`);
+      const error = new Error(`HTTP ${response.status}: ${responseDataToText(response.data)}`);
+      Reflect.set(error, 'status', response.status);
+      Reflect.set(error, 'responseData', response.data);
+      lastError = error;
       if (!hasNextEndpoint || !shouldFallbackProjectContextStatus(response.status)) {
         break;
       }
@@ -1094,6 +1179,7 @@ export class GoogleAPIService {
       projectId,
       subscriptionTier,
       subscription,
+      ...(validation ? { validation } : {}),
     };
   }
 
@@ -1179,6 +1265,36 @@ export class GoogleAPIService {
     return /^HTTP 4\d{2}\b/.test(errorMsg) && !errorMsg.startsWith('HTTP 429');
   }
 
+  /** Reads transient account-validation details detected during a `fetchQuota` call. */
+  static getValidationObservation(
+    quota: QuotaData | undefined,
+  ): ValidationRequiredObservation | undefined {
+    return quota ? quotaValidationObservations.get(quota) : undefined;
+  }
+
+  /** Extracts trusted `VALIDATION_REQUIRED` details from a rejected Google quota request. */
+  static extractValidationFromQuotaError(
+    error: unknown,
+  ): ValidationRequiredObservation | undefined {
+    if (error && typeof error === 'object') {
+      const attached = Reflect.get(error, 'validationObservation') as
+        | ValidationRequiredObservation
+        | undefined;
+      if (attached) {
+        return attached;
+      }
+      if ('responseData' in error) {
+        const message = error instanceof Error ? error.message : undefined;
+        return extractValidationFromUpstreamErrorPayload(
+          (error as { responseData?: unknown }).responseData,
+          message,
+        );
+      }
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    return extractValidationFromUpstreamErrorPayload(undefined, message);
+  }
+
   /**
    * Core logic: Fetches detailed model quota information.
    */
@@ -1200,8 +1316,10 @@ export class GoogleAPIService {
       );
     } catch (error) {
       signal?.throwIfAborted();
+      const validationFromContextError = this.extractValidationFromQuotaError(error);
       projectContext = {
         subscription: { refresh_status: 'failed', checked_at: Date.now() },
+        ...(validationFromContextError ? { validation: validationFromContextError } : {}),
       };
       logger.warn(
         '[GoogleAPIService] Project context unavailable; continuing quota lookup without project',
@@ -1255,6 +1373,13 @@ export class GoogleAPIService {
               const error = new Error(text ? `FORBIDDEN: ${text}` : 'FORBIDDEN');
               Reflect.set(error, 'status', 403);
               Reflect.set(error, 'responseData', response.data);
+              const mergedValidation = mergeValidationObservations(
+                extractValidationFromUpstreamErrorPayload(response.data, error.message),
+                projectContext.validation,
+              );
+              if (mergedValidation) {
+                Reflect.set(error, 'validationObservation', mergedValidation);
+              }
               throw error;
             }
             if (status === 401) {
@@ -1284,7 +1409,7 @@ export class GoogleAPIService {
           if (projectContext.subscription) {
             result.subscription = projectContext.subscription;
           }
-          const quotaGroups = await this.fetchQuotaSummary(
+          const summary = await this.fetchQuotaSummary(
             accessToken,
             currentPayload.project,
             axiosOptions,
@@ -1292,9 +1417,16 @@ export class GoogleAPIService {
             deadlineAt,
           );
           signal?.throwIfAborted();
-          if (quotaGroups) {
-            result.quota_groups = quotaGroups;
-            populateSyntheticArgonModels(result.models, quotaGroups);
+          if (summary.groups) {
+            result.quota_groups = summary.groups;
+            populateSyntheticArgonModels(result.models, summary.groups);
+          }
+          const validation = mergeValidationObservations(
+            projectContext.validation,
+            summary.validation,
+          );
+          if (validation) {
+            quotaValidationObservations.set(result, validation);
           }
 
           if (endpointIndex > 0) {
@@ -1343,7 +1475,7 @@ export class GoogleAPIService {
     axiosOptions: GoogleApiProxyOptions,
     signal: AbortSignal | undefined,
     deadlineAt: number,
-  ): Promise<QuotaGroup[] | undefined> {
+  ): Promise<{ groups?: QuotaGroup[]; validation?: ValidationRequiredObservation }> {
     let currentPayload: { project?: string } = projectId ? { project: projectId } : {};
     // Model-specific groups such as Gemini 4 Argon are not returned to the bare client identity.
     const headers = buildInternalApiHeaders(
@@ -1355,7 +1487,7 @@ export class GoogleAPIService {
       while (true) {
         const remainingMs = deadlineAt - Date.now();
         if (remainingMs <= 0) {
-          return undefined;
+          return {};
         }
         signal?.throwIfAborted();
         try {
@@ -1367,7 +1499,7 @@ export class GoogleAPIService {
             ...axiosOptions,
           });
           if (Date.now() >= deadlineAt) {
-            return undefined;
+            return {};
           }
 
           signal?.throwIfAborted();
@@ -1386,21 +1518,27 @@ export class GoogleAPIService {
               currentPayload = {};
               continue;
             }
+            if (response.status === 403) {
+              const validation = extractValidationFromUpstreamErrorPayload(response.data);
+              if (validation) {
+                return { validation };
+              }
+            }
             if (
               response.status !== 408 &&
               response.status !== 429 &&
               !(response.status >= 500 && response.status < 600)
             ) {
-              return undefined;
+              return {};
             }
             break;
           }
 
           try {
-            return toQuotaGroups(parseQuotaSummaryResponse(response.data));
+            return { groups: toQuotaGroups(parseQuotaSummaryResponse(response.data)) };
           } catch (error) {
             logger.warn('[GoogleAPIService] Quota summary response is invalid', error);
-            return undefined;
+            return {};
           }
         } catch (error) {
           signal?.throwIfAborted();
@@ -1410,6 +1548,6 @@ export class GoogleAPIService {
       }
     }
 
-    return undefined;
+    return {};
   }
 }

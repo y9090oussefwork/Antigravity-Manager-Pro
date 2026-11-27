@@ -260,8 +260,10 @@ function classifyFromDetails(
 
   return {
     kind: 'validation_required',
-    validationLink: links[0]?.url ?? sanitizeUrl(errorInfo.metadata?.validation_link),
-    validationDescription: links[0]?.description,
+    validationLink:
+      links[0]?.url ?? sanitizeUrl(errorInfo.metadata?.validation_link ?? errorInfo.metadata?.validation_url),
+    validationDescription:
+      links[0]?.description ?? sanitizeDescription(errorInfo.metadata?.validation_error_message),
     learnMoreUrl,
   };
 }
@@ -326,7 +328,9 @@ function classifyFromText(text: string): ForbiddenUpstreamClassification | null 
   }
 
   const linkMatch =
-    /"validation_link"\s*:\s*"([^"]+)"/.exec(text) ?? /"url"\s*:\s*"([^"]+)"/.exec(text);
+    /"validation_link"\s*:\s*"([^"]+)"/.exec(text) ??
+    /"validation_url"\s*:\s*"([^"]+)"/.exec(text) ??
+    /"url"\s*:\s*"([^"]+)"/.exec(text);
   return {
     kind: 'validation_required',
     validationLink: sanitizeUrl(linkMatch?.[1]),

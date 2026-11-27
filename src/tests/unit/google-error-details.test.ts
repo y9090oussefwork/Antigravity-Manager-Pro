@@ -73,6 +73,36 @@ describe('google error details', () => {
     });
   });
 
+  it('extracts validation_url and validation_error_message metadata when Help links are absent', () => {
+    expect(
+      classifyForbiddenUpstreamError({
+        details: [
+          {
+            domain: 'cloudcode-pa.googleapis.com',
+            reason: 'VALIDATION_REQUIRED',
+            metadata: {
+              validation_url: 'https://accounts.google.com/v3/signin/continue?plt=synthetic',
+              validation_error_message: 'Verify your account to continue.',
+            },
+          },
+        ],
+      }),
+    ).toEqual({
+      kind: 'validation_required',
+      validationLink: 'https://accounts.google.com/v3/signin/continue?plt=synthetic',
+      validationDescription: 'Verify your account to continue.',
+      learnMoreUrl: undefined,
+    });
+    expect(
+      classifyForbiddenUpstreamError({
+        body: '{"domain":"cloudcode-pa.googleapis.com","reason":"VALIDATION_REQUIRED","validation_url":"https://accounts.google.com/v3/signin/continue?plt=text"}',
+      }),
+    ).toEqual({
+      kind: 'validation_required',
+      validationLink: 'https://accounts.google.com/v3/signin/continue?plt=text',
+    });
+  });
+
   it.each([
     ['Gemini Code Assist is not currently available in your location.', 'location_ineligible'],
     [

@@ -1337,6 +1337,18 @@ const fr = {
       instruction:
         'Démarrez la connexion ci-dessus, puis collez son code ou son adresse de retour. L’adresse doit contenir le state de cette connexion.',
       verify: 'Verifier et ajouter',
+      'validation-required': {
+        title: 'Vérification du compte requise',
+        description:
+          '{{email}} a été enregistré, mais Google exige une vérification avant que Antigravity puisse utiliser ce compte.',
+        hint: 'Terminez d’abord la vérification sur votre téléphone ou navigateur, puis cliquez sur Vérifier à nouveau pour activer le compte immédiatement.',
+        'still-pending':
+          'Google exige toujours une vérification pour ce compte. Terminez la vérification dans votre navigateur, puis vérifiez à nouveau.',
+        'recheck-failed':
+          'Impossible de vérifier l’état de validation du compte. Réessayez.',
+        recheck: 'Vérifier à nouveau',
+        later: 'Vérifier plus tard',
+      },
     },
     localImport: {
       ...en.cloud.localImport,
@@ -1602,6 +1614,7 @@ const fr = {
         },
       },
       addSuccess: 'Compte ajoute avec succes !',
+      validationVerified: 'Compte vérifié et prêt à être utilisé !',
       addFailed: {
         title: 'Echec de l ajout du compte',
         codes: {

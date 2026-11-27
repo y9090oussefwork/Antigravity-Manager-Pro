@@ -1868,6 +1868,17 @@ const en = {
       instruction:
         'Start sign-in above, then paste its code or callback address. Callback addresses must include the state from this sign-in.',
       verify: 'Verify & Add',
+      'validation-required': {
+        title: 'Account Verification Required',
+        description:
+          '{{email}} was saved, but Google requires verification before Antigravity can use this account.',
+        hint: 'Complete the phone or browser verification step first, then click Check Verification so the account is ready right away.',
+        'still-pending':
+          'Google still requires verification for this account. Finish the verification step in your browser, then check again.',
+        'recheck-failed': 'Could not check account verification status. Try again.',
+        recheck: 'Check Verification',
+        later: 'Verify Later',
+      },
     },
     localImport: {
       scan: 'Scan this device',
@@ -2147,6 +2158,7 @@ const en = {
         },
       },
       addSuccess: 'Account added successfully!',
+      validationVerified: 'Account verified and ready to use!',
       addFailed: {
         title: 'Failed to add account',
         codes: {

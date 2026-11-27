@@ -2084,6 +2084,18 @@ const ptBR = {
       instruction:
         'Inicie o login acima e cole o código ou endereço de retorno dessa tentativa. O endereço deve incluir o state desse login.',
       verify: 'Verificar e Adicionar',
+      'validation-required': {
+        title: 'Verificação da conta necessária',
+        description:
+          '{{email}} foi salvo, mas o Google exige verificação antes que o Antigravity possa usar esta conta.',
+        hint: 'Conclua primeiro a verificação no celular ou navegador e clique em Verificar novamente para deixar a conta pronta agora.',
+        'still-pending':
+          'O Google ainda exige verificação para esta conta. Conclua a verificação no navegador e tente novamente.',
+        'recheck-failed':
+          'Não foi possível verificar o status de validação da conta. Tente novamente.',
+        recheck: 'Verificar novamente',
+        later: 'Verificar depois',
+      },
     },
     localImport: {
       scan: 'Examinar este dispositivo',
@@ -2373,6 +2385,7 @@ const ptBR = {
         },
       },
       addSuccess: 'Conta adicionada com sucesso!',
+      validationVerified: 'Conta verificada e pronta para uso!',
       addFailed: {
         title: 'Falha ao adicionar conta',
         codes: {

@@ -14,6 +14,8 @@ const actions = vi.hoisted(() => ({
   waitForOAuthSession: vi.fn(),
   submitOAuthSessionCallback: vi.fn(),
   cancelOAuthSession: vi.fn(),
+  openAccountValidationLink: vi.fn(),
+  refreshAccountQuota: vi.fn(),
   importCloudAccountRefreshToken: vi.fn(),
   setActiveOAuthClient: vi.fn(),
   exportCloudAccounts: vi.fn(),
@@ -45,6 +47,8 @@ beforeEach(() => {
   actions.openOAuthSession.mockResolvedValue(undefined);
   actions.copyOAuthSessionLink.mockResolvedValue(undefined);
   actions.submitOAuthSessionCallback.mockResolvedValue(undefined);
+  actions.openAccountValidationLink.mockResolvedValue(undefined);
+  actions.refreshAccountQuota.mockResolvedValue(undefined);
   actions.setActiveOAuthClient.mockResolvedValue(undefined);
 });
 afterEach(async () => {
@@ -141,6 +145,63 @@ describe('account dialog state ownership', () => {
     });
     expect(actions.parentRender).toHaveBeenCalledOnce();
     expect(actions.siblingRender).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the dialog open for account verification when enrollment detects VALIDATION_REQUIRED', async () => {
+    const unverifiedAccount = {
+      id: 'account-validation-1',
+      provider: 'google',
+      email: 'verify@example.com',
+      created_at: 1,
+      last_used: 1,
+      status: 'active',
+      health: {
+        validation: {
+          status: 'requires_action',
+          reason: 'VALIDATION_REQUIRED',
+          has_verification_link: true,
+        },
+      },
+    };
+    const verifiedAccount = {
+      ...unverifiedAccount,
+      health: undefined,
+    };
+    const login = Promise.withResolvers<typeof unverifiedAccount>();
+    actions.waitForOAuthSession.mockReturnValueOnce(login.promise);
+    actions.refreshAccountQuota
+      .mockResolvedValueOnce(unverifiedAccount)
+      .mockResolvedValueOnce(verifiedAccount);
+    renderDialogs();
+    await userEvent.click(await openLogin());
+    await act(async () => login.resolve(unverifiedAccount));
+
+    expect(
+      await screen.findByText('cloud.authDialog.validation-required.title'),
+    ).toBeTruthy();
+    expect(actions.toast).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'cloud.card.completeValidation' }));
+    expect(actions.openAccountValidationLink).toHaveBeenCalledExactlyOnceWith({
+      accountId: 'account-validation-1',
+    });
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'cloud.authDialog.validation-required.recheck' }),
+    );
+    expect(
+      await screen.findByText('cloud.authDialog.validation-required.still-pending'),
+    ).toBeTruthy();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'cloud.authDialog.validation-required.recheck' }),
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(actions.toast).toHaveBeenCalledWith({
+      title: 'cloud.toast.validationVerified',
+      variant: 'success',
+    });
   });
 
   it('cancels when leaving the authorization tab and clears the callback on return', async () => {

@@ -15,6 +15,7 @@ import {
 import { getLocalizedErrorMessage } from '@/shared/utils/errorMessages';
 import { readFinalizedOperationDiagnostic } from '@/shared/observability/operationDiagnostic';
 import { formatOperationDiagnostic } from '@/shared/observability/operationDiagnosticText';
+import type { CloudAccountView } from '../services/cloud-account-view';
 import {
   cancelOAuthSession,
   copyOAuthSessionLink,
@@ -49,7 +50,7 @@ function loginFailureDescription(error: unknown, t: TFunction): string {
 interface OAuthAttemptProps {
   clientKey: string;
   sessionQueueRef: RefObject<Promise<void>>;
-  onAuthorized: (isCurrent: boolean) => void;
+  onAuthorized: (isCurrent: boolean, account?: CloudAccountView) => void;
   onRestart: () => void;
 }
 
@@ -83,7 +84,7 @@ function OAuthAttempt({ clientKey, sessionQueueRef, onAuthorized, onRestart }: O
         sessionId = prepared.sessionId;
         setAttempt({ kind: 'ready', sessionId });
         waitForOAuthSession(sessionId).then(
-          () => onAuthorized(current),
+          (account) => onAuthorized(current, account),
           (error: unknown) => {
             if (current) {
               setAttempt({ kind: 'failed', error });

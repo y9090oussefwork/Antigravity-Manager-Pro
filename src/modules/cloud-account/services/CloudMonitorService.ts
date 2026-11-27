@@ -15,7 +15,10 @@ import {
   isRetryableInvalidGrantRefreshError,
 } from './CloudAccountRefreshService';
 import { clearValidationHealthAfterSuccessfulProbe } from './CloudAccountHealthService';
-import { persistServiceDisabledFromQuotaFailure } from './cloud-account-quota-refresh.service';
+import {
+  persistServiceDisabledFromQuotaFailure,
+  persistValidationRequiredHealth,
+} from './cloud-account-quota-refresh.service';
 import { proxyModelAvailabilityStore } from '@/server/gateway/shared/services/model-availability.service';
 import { AutoSwitchService } from './AutoSwitchService';
 import { logger } from '@/shared/logging/logger';
@@ -75,11 +78,19 @@ function resolveAutoSwitchTargets(): AntigravityAppTarget[] {
 }
 const BooleanSettingSchema = z.boolean();
 
-function persistMonitorFailure(
+async function persistMonitorFailure(
   account: CloudAccount,
   error: unknown,
   guard: CloudAccountWriteGuard,
 ): Promise<void> {
+  const validationFailure = GoogleAPIService.extractValidationFromQuotaError(error);
+  if (validationFailure) {
+    await CloudAccountRepo.setAccountStatus(account.id, 'active', null, guard);
+    account.status = 'active';
+    account.status_reason = undefined;
+    await persistValidationRequiredHealth(account, validationFailure, guard);
+    return;
+  }
   return persistServiceDisabledFromQuotaFailure(account, error, guard, () =>
     persistMonitorAccountStatusFromError(account.id, error, guard),
   );
@@ -344,10 +355,14 @@ export class CloudMonitorService {
           account.quota = current?.quota;
 
           let quota: QuotaData;
+          let validationObservation:
+            | ReturnType<typeof GoogleAPIService.getValidationObservation>
+            | undefined;
           const previousAICredits = current?.quota?.ai_credits;
 
           try {
             const fetchedQuota = await GoogleAPIService.fetchQuota(accessToken, account.proxy_url);
+            validationObservation = GoogleAPIService.getValidationObservation(fetchedQuota);
             await writeback.assertCurrent();
             observation.accept();
             quota = { ...fetchedQuota };
@@ -425,6 +440,7 @@ export class CloudMonitorService {
                 accessToken,
                 account.proxy_url,
               );
+              validationObservation = GoogleAPIService.getValidationObservation(retriedQuota);
               await writeback.assertCurrent();
               observation.accept();
               quota = { ...retriedQuota };
@@ -457,12 +473,18 @@ export class CloudMonitorService {
           await CloudAccountRepo.updateQuota(account.id, quota, writeback.guard);
           account.quota = quota;
           await CloudAccountRepo.setAccountStatus(account.id, 'active', null, writeback.guard);
-          await clearValidationHealthAfterSuccessfulProbe(account, writeback.guard);
+          if (validationObservation) {
+            await persistValidationRequiredHealth(account, validationObservation, writeback.guard);
+          } else {
+            await clearValidationHealthAfterSuccessfulProbe(account, writeback.guard);
+          }
           await writeback.assertCurrent();
-          proxyModelAvailabilityStore.clearCapabilityFailures(
-            account.id,
-            Object.keys(quota.models),
-          );
+          if (!validationObservation) {
+            proxyModelAvailabilityStore.clearCapabilityFailures(
+              account.id,
+              Object.keys(quota.models),
+            );
+          }
           account.status = 'active';
           account.status_reason = undefined;
           refreshedAccounts.push(account);

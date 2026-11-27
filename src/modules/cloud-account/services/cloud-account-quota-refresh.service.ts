@@ -6,7 +6,8 @@ import {
 import { assertAccountOAuthRecoveryReady } from '@/modules/cloud-account/persistence/oauth-recovery-service';
 import type { CloudAccount } from '@/modules/cloud-account/types';
 import { classifyAccountStatusFromError } from '@/modules/cloud-account/utils/account-status';
-import { GoogleAPIService } from './GoogleAPIService';
+import { GoogleAPIService, type ValidationRequiredObservation } from './GoogleAPIService';
+import { normalizeTrustedGoogleValidationUrl } from '@/modules/cloud-account/utils/google-validation-url';
 import {
   CloudAccountRefreshService,
   createCloudAccountRefreshRequest,
@@ -54,6 +55,41 @@ function recoverCachedQuotaOnRateLimit(
     return null;
   }
   return account.quota;
+}
+
+const VALIDATION_PROBE_COOLDOWN_MS = 10 * 60 * 1000;
+
+/** Records `VALIDATION_REQUIRED` health state and quarantines the account in any running lease cache. */
+export async function persistValidationRequiredHealth(
+  account: CloudAccount,
+  observation: ValidationRequiredObservation,
+  guard: CloudAccountWriteGuard,
+): Promise<void> {
+  const now = Date.now();
+  const nextProbeAt = now + VALIDATION_PROBE_COOLDOWN_MS;
+  const verificationUrl = normalizeTrustedGoogleValidationUrl(observation.verificationUrl);
+  const description = observation.description?.trim().slice(0, 500) || undefined;
+  const updatedHealth = await CloudAccountHealthService.mutateHealth(
+    account.id,
+    (health) => ({
+      ...health,
+      validation: {
+        status: 'requires_action',
+        reason: 'VALIDATION_REQUIRED',
+        detected_at_ms: now,
+        next_probe_at_ms: nextProbeAt,
+        verification_url: verificationUrl ?? health?.validation?.verification_url,
+        description: description ?? health?.validation?.description,
+      },
+    }),
+    { assertAccount: guard },
+  );
+  account.health = updatedHealth;
+  try {
+    await quarantineAccountInActiveLeaseCache(account.id);
+  } catch {
+    // Active lease quarantine is best-effort when running without a booted gateway server.
+  }
 }
 
 /** Fail closed in the lease cache while recording a provider's confirmed service quarantine. */
@@ -172,6 +208,7 @@ async function refreshAccountQuotaCoreOwned(
         account.token.access_token,
         account.proxy_url,
       );
+      const validationObservation = GoogleAPIService.getValidationObservation(quota);
       await writeback.assertCurrent();
       observation.accept();
 
@@ -200,9 +237,15 @@ async function refreshAccountQuotaCoreOwned(
       CloudAccountRepo.updateLastUsed(account.id, writeback.guard);
       account.last_used = Math.floor(Date.now() / 1000);
       await clearAccountStatus(account, writeback.guard);
-      await clearValidationHealthAfterSuccessfulProbe(account, writeback.guard);
+      if (validationObservation) {
+        await persistValidationRequiredHealth(account, validationObservation, writeback.guard);
+      } else {
+        await clearValidationHealthAfterSuccessfulProbe(account, writeback.guard);
+      }
       await writeback.assertCurrent();
-      proxyModelAvailabilityStore.clearCapabilityFailures(account.id, Object.keys(quota.models));
+      if (!validationObservation) {
+        proxyModelAvailabilityStore.clearCapabilityFailures(account.id, Object.keys(quota.models));
+      }
 
       hooks.onPrimarySuccess?.(account);
       return account;
@@ -227,6 +270,7 @@ async function refreshAccountQuotaCoreOwned(
             account.token.access_token,
             account.proxy_url,
           );
+          const retryValidationObservation = GoogleAPIService.getValidationObservation(quota);
           await writeback.assertCurrent();
           observation.accept();
 
@@ -255,12 +299,22 @@ async function refreshAccountQuotaCoreOwned(
           CloudAccountRepo.updateLastUsed(account.id, writeback.guard);
           account.last_used = Math.floor(Date.now() / 1000);
           await clearAccountStatus(account, writeback.guard);
-          await clearValidationHealthAfterSuccessfulProbe(account, writeback.guard);
+          if (retryValidationObservation) {
+            await persistValidationRequiredHealth(
+              account,
+              retryValidationObservation,
+              writeback.guard,
+            );
+          } else {
+            await clearValidationHealthAfterSuccessfulProbe(account, writeback.guard);
+          }
           await writeback.assertCurrent();
-          proxyModelAvailabilityStore.clearCapabilityFailures(
-            account.id,
-            Object.keys(quota.models),
-          );
+          if (!retryValidationObservation) {
+            proxyModelAvailabilityStore.clearCapabilityFailures(
+              account.id,
+              Object.keys(quota.models),
+            );
+          }
 
           hooks.onRetrySuccess?.(account);
           return account;
@@ -297,6 +351,12 @@ async function refreshAccountQuotaCoreOwned(
         await writeback.assertCurrent(error);
         observation.accept(error);
         const guard = writeback.guardFor(error);
+        const validationFailure = GoogleAPIService.extractValidationFromQuotaError(error);
+        if (validationFailure) {
+          await clearAccountStatus(account, guard);
+          await persistValidationRequiredHealth(account, validationFailure, guard);
+          return account;
+        }
         await persistServiceDisabledFromQuotaFailure(account, error, guard, () =>
           markAccountStatusFromError(account, error, guard),
         );
