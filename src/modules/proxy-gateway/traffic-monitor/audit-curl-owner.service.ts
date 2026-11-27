@@ -1,12 +1,12 @@
 import { z } from 'zod';
-import { DiagnosticContentCapabilities } from '../diagnostics/content-capability';
+import { DiagnosticContentCapabilities } from '@/shared/observability/content-capability';
 import {
   ContentIdentitySchema,
   ContentReadInputSchema,
   ContentClosedSchema,
   type ContentReadInput,
   type ContentIdentity,
-} from '../diagnostics/content-capability.schema';
+} from '@/shared/observability/content-capability.schema';
 import { buildAuditCurl } from './build-audit-curl';
 import {
   AuditCurlInputSchema,
@@ -35,7 +35,7 @@ export function createAuditCurlOwner(
       () => undefined,
       () => undefined,
     );
-    void tail.then(() => pending.delete(task));
+    tail.then(() => pending.delete(task));
     return task;
   }
   return {

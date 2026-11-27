@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { of, throwError } from 'rxjs';
+import { isObservable, lastValueFrom, of, throwError, toArray } from 'rxjs';
 import { HttpException } from '@nestjs/common';
 
 const auditMocks = vi.hoisted(() => ({
@@ -13,10 +13,10 @@ vi.mock('@/modules/proxy-gateway/audit/traffic-audit-context', () => ({
   getProxyResponseTimingContext: () => undefined,
 }));
 
-import { GeminiController } from '../../modules/proxy-gateway/server/modules/gemini/gemini.controller';
+import { GeminiController } from '../../server/gateway/modules/gemini/gemini.controller';
 import { DEFAULT_APP_CONFIG } from '../../modules/config/types';
 import { setServerConfig } from '../../server/server-config';
-import { ProxyAccountUnavailableError } from '../../modules/proxy-gateway/server/common/exceptions/proxy-account-unavailable.exception';
+import { ProxyAccountUnavailableError } from '../../server/gateway/common/exceptions/proxy-account-unavailable.exception';
 
 function createReplyMock() {
   const reply: Record<string, any> = {};
@@ -80,12 +80,12 @@ describe('GeminiController Integration', () => {
     const proxyService = {};
     const accountLeaseService = {
       getAllCollectedModels: vi.fn(
-        () => new Set(['gemini-3-flash', 'gemini-3.1-pro-high', 'gemini-3.5-flash-extra-low']),
+        () => new Set(['gemini-3-flash', 'gemini-3.1-pro-low', 'gemini-3.5-flash-extra-low']),
       ),
     };
     const controller = new GeminiController(proxyService as any, accountLeaseService as any);
     const models = controller.listModels();
-    const model = controller.getModel('gemini-2.5-flash');
+    const model = controller.getModel('gemini-3-flash');
 
     expect(models).toEqual(
       expect.objectContaining({
@@ -98,15 +98,15 @@ describe('GeminiController Integration', () => {
           expect.objectContaining({
             name: 'models/gemini-3-flash',
             description: '',
-            inputTokenLimit: 128000,
-            outputTokenLimit: 8192,
+            inputTokenLimit: 1048576,
+            outputTokenLimit: 65536,
             supportedGenerationMethods: ['generateContent', 'countTokens'],
           }),
           expect.objectContaining({
-            name: 'models/gemini-3.1-pro-high',
+            name: 'models/gemini-3.1-pro-low',
             description: '',
-            inputTokenLimit: 128000,
-            outputTokenLimit: 8192,
+            inputTokenLimit: 1048576,
+            outputTokenLimit: 65536,
             supportedGenerationMethods: ['generateContent', 'countTokens'],
           }),
           expect.objectContaining({
@@ -117,10 +117,23 @@ describe('GeminiController Integration', () => {
     );
     expect(model).toEqual(
       expect.objectContaining({
-        name: 'models/gemini-2.5-flash',
-        displayName: 'gemini-2.5-flash',
+        name: 'models/gemini-3-flash',
+        displayName: 'gemini-3-flash',
       }),
     );
+  });
+
+  it('returns a protocol 404 for an unknown model instead of inventing metadata', () => {
+    const controller = new GeminiController({} as any);
+
+    try {
+      controller.getModel('unknown-model');
+      throw new Error('expected unknown model to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(HttpException);
+      expect((error as HttpException).getStatus()).toBe(404);
+      expect((error as HttpException).message).toBe("Model 'models/unknown-model' was not found");
+    }
   });
 
   it('keeps Antigravity public presets before dynamic quota cache is available', () => {
@@ -138,7 +151,7 @@ describe('GeminiController Integration', () => {
         'models/gemini-3.5-flash-high',
         'models/gemini-3.5-flash-low',
         'models/gemini-3.1-pro-low',
-        'models/gemini-3.1-pro-high',
+        'models/gemini-3.1-pro-low',
         'models/claude-sonnet-4-6-thinking',
         'models/claude-opus-4-6-thinking',
         'models/gpt-oss-120b-medium',
@@ -157,7 +170,8 @@ describe('GeminiController Integration', () => {
 
     const accountLeaseService = {
       getAllRawQuotaModels: vi.fn(
-        () => new Set(['gemini-3-pro-image', 'gemini-2.5-flash', 'gemini-pro-agent']),
+        () =>
+          new Set(['gemini-3-pro-image', 'gemini-2.5-flash', 'gemini-pro-agent', 'gemini-3-flash']),
       ),
     };
     const controller = new GeminiController({} as any, accountLeaseService as any);
@@ -168,11 +182,11 @@ describe('GeminiController Integration', () => {
     expect(payload).toEqual({
       models: [
         {
-          name: 'models/gemini-2.5-flash',
-          displayName: 'gemini-2.5-flash',
+          name: 'models/gemini-3-flash',
+          displayName: 'gemini-3-flash',
           description: '',
-          inputTokenLimit: 128000,
-          outputTokenLimit: 8192,
+          inputTokenLimit: 1048576,
+          outputTokenLimit: 65536,
           supportedGenerationMethods: ['generateContent', 'countTokens'],
           temperature: 1,
           topK: 64,
@@ -183,20 +197,8 @@ describe('GeminiController Integration', () => {
           name: 'models/gemini-3-pro-image',
           displayName: 'gemini-3-pro-image',
           description: '',
-          inputTokenLimit: 128000,
-          outputTokenLimit: 8192,
-          supportedGenerationMethods: ['generateContent', 'countTokens'],
-          temperature: 1,
-          topK: 64,
-          topP: 0.95,
-          version: '001',
-        },
-        {
-          name: 'models/gemini-pro-agent',
-          displayName: 'gemini-pro-agent',
-          description: '',
-          inputTokenLimit: 128000,
-          outputTokenLimit: 8192,
+          inputTokenLimit: 1048576,
+          outputTokenLimit: 65536,
           supportedGenerationMethods: ['generateContent', 'countTokens'],
           temperature: 1,
           topK: 64,
@@ -232,14 +234,18 @@ describe('GeminiController Integration', () => {
     const reply = createReplyMock();
 
     await controller.modelAction(
-      'models/gemini-3.1-pro-high:generateContent',
+      'models/gemini-3.1-pro-low:generateContent',
       { contents: [{ role: 'user', parts: [{ text: 'hello' }] }] } as any,
       reply as any,
     );
 
     expect(proxyService.handleGeminiGenerateContent).toHaveBeenCalledWith(
-      'models/gemini-3.1-pro-high',
-      expect.any(Object),
+      'models/gemini-3.1-pro-low',
+      { contents: [{ role: 'user', parts: [{ text: 'hello' }] }] },
+      'generate-content',
+      expect.any(AbortSignal),
+      'gemini',
+      { headers: {}, url: undefined },
     );
     expect(reply.status).toHaveBeenCalledWith(200);
     expect(reply.send).toHaveBeenCalledWith({
@@ -259,16 +265,16 @@ describe('GeminiController Integration', () => {
   });
 
   it('handles streamGenerateContent action and emits SSE headers', async () => {
-    const stream = of('data: {"ok":true}\n\n');
+    const event = 'data: {"ok":true}\n\n';
     const proxyService = {
       handleGeminiGenerateContent: vi.fn(),
-      handleGeminiStreamGenerateContent: vi.fn().mockResolvedValue(stream),
+      handleGeminiStreamGenerateContent: vi.fn().mockResolvedValue(of(event)),
     };
     const controller = new GeminiController(proxyService as any);
     const reply = createReplyMock();
 
     await controller.modelAction(
-      'gemini-2.5-flash:streamGenerateContent',
+      'gemini-3-flash:streamGenerateContent',
       { contents: [{ role: 'user', parts: [{ text: 'hello' }] }] } as any,
       reply as any,
     );
@@ -276,7 +282,12 @@ describe('GeminiController Integration', () => {
     expect(reply.header).toHaveBeenCalledWith('Content-Type', 'text/event-stream');
     expect(reply.header).toHaveBeenCalledWith('Cache-Control', 'no-cache');
     expect(reply.header).toHaveBeenCalledWith('Connection', 'keep-alive');
-    expect(reply.send).toHaveBeenCalledWith(stream);
+    expect(reply.send).toHaveBeenCalledOnce();
+    const response: unknown = reply.send.mock.calls[0][0];
+    if (!isObservable(response)) {
+      throw new Error('Expected a streaming response');
+    }
+    await expect(lastValueFrom(response.pipe(toArray()))).resolves.toEqual([event]);
   });
 
   it('writes an SSE error event through the raw reply stream', async () => {
@@ -372,7 +383,9 @@ describe('GeminiController Integration', () => {
 
   it('supports countTokens action', async () => {
     const proxyService = {
-      handleGeminiCountTokens: vi.fn().mockResolvedValue(9),
+      handleGeminiCountTokensWithSource: vi
+        .fn()
+        .mockResolvedValue({ totalTokens: 9, source: 'upstream' }),
       handleGeminiGenerateContent: vi.fn(),
       handleGeminiStreamGenerateContent: vi.fn(),
     };
@@ -382,12 +395,14 @@ describe('GeminiController Integration', () => {
 
     await controller.countTokens('gemini-2.5-flash', body as any, reply as any);
 
-    expect(proxyService.handleGeminiCountTokens).toHaveBeenCalledWith(
+    expect(proxyService.handleGeminiCountTokensWithSource).toHaveBeenCalledWith(
       'models/gemini-2.5-flash',
       body,
+      undefined,
     );
     expect(reply.status).toHaveBeenCalledWith(200);
     expect(reply.send).toHaveBeenCalledWith({ totalTokens: 9 });
+    expect(reply.header).toHaveBeenCalledWith('X-AGM-Count-Tokens-Source', 'upstream');
   });
 
   it('returns bad request for invalid combined endpoint action', async () => {

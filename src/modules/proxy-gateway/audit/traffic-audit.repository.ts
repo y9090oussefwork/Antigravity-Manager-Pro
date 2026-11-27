@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { count, eq, sql } from 'drizzle-orm';
+import { and, between, count, desc, eq, isNull, sql } from 'drizzle-orm';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { getQuotaModelFamilyId } from '@/modules/cloud-account/utils/quota-model-families';
 
@@ -18,7 +18,24 @@ import {
   initializeTrafficAuditSchema,
   openTrafficAuditDatabase,
 } from './traffic-audit-database';
-import type { TrafficAuditWorkerCommand } from './traffic-audit.worker-protocol';
+import type {
+  TrafficAuditWorkerCommand,
+  AuditCaptureGeneration,
+} from './traffic-audit.worker-protocol';
+import { initialAuditGenerations, AUDIT_TRAFFIC_CLASSES } from './audit-capture-generations';
+import { readUsageRange } from './traffic-audit-usage-range';
+import { readUsageTrends } from './traffic-audit-usage-trends';
+import { readRequestActivity } from './traffic-audit-activity-days';
+import { readUsageOverview } from './traffic-audit-usage-overview';
+import { readAuditSessionOptions } from './audit-session-options';
+import { DEFAULT_APP_CONFIG } from '@/modules/config/types';
+import { recoverInterruptedAudit } from './traffic-audit-recovery';
+import { auditSessionSnapshot } from './audit-session-snapshot';
+import {
+  TrafficAuditDiskBudget,
+  AuditDiskAdmissionError,
+  toAuditDiskAdmissionError,
+} from './traffic-audit-disk-budget';
 
 type TrafficAuditDatabase = BetterSQLite3Database<typeof trafficAuditSchema>;
 type MaintenanceCommand = Extract<
@@ -26,36 +43,128 @@ type MaintenanceCommand = Extract<
   { operation: 'maintenance' | 'configure' }
 >;
 export class TrafficAuditRepository {
+  private readonly generations = initialAuditGenerations();
   private readonly raw: Database.Database;
   private readonly orm: TrafficAuditDatabase;
   private readonly queries: TrafficAuditQueries;
   private readonly retention: TrafficAuditRetention;
   private readonly payloads: TrafficAuditPayloads;
+  private readonly diskBudget: TrafficAuditDiskBudget;
+  private activeDiskBudget = DEFAULT_APP_CONFIG.proxy.traffic_audit.max_disk_mib * 1024 * 1024;
 
-  public constructor(databasePath: string) {
+  public constructor(databasePath: string, ownerStartedAt = Math.floor(performance.timeOrigin)) {
     this.raw = openTrafficAuditDatabase(databasePath);
-    configureTrafficAuditDatabase(this.raw);
-    initializeTrafficAuditSchema(this.raw);
-    this.orm = drizzle(this.raw, { schema: trafficAuditSchema });
-    this.queries = new TrafficAuditQueries(this.raw, this.orm);
-    this.retention = new TrafficAuditRetention(databasePath, this.raw, this.orm);
-    this.payloads = new TrafficAuditPayloads(this.raw, this.orm);
-    this.raw
-      .prepare(
-        "UPDATE audit_payloads SET state='incomplete',partial=1," +
-          "dropped_reason=COALESCE(dropped_reason,'worker_restart')," +
-          'stored_bytes=COALESCE((SELECT SUM(byte_length) FROM audit_payload_chunks ' +
-          'WHERE payload_id=audit_payloads.id),0),chunk_count=(SELECT COUNT(*) FROM ' +
-          "audit_payload_chunks WHERE payload_id=audit_payloads.id),completed_at=? WHERE state='writing'",
-      )
-      .run(Date.now());
+    try {
+      configureTrafficAuditDatabase(this.raw);
+      initializeTrafficAuditSchema(this.raw);
+      this.orm = drizzle(this.raw, { schema: trafficAuditSchema });
+      this.queries = new TrafficAuditQueries(this.raw, this.orm);
+      this.retention = new TrafficAuditRetention(databasePath, this.raw);
+      this.diskBudget = new TrafficAuditDiskBudget(databasePath, this.raw);
+      this.payloads = new TrafficAuditPayloads(this.raw, this.orm, (bytes) =>
+        this.diskBudget.assertCanWrite(bytes, this.activeDiskBudget),
+      );
+      recoverInterruptedAudit(this.raw, ownerStartedAt);
+    } catch (error) {
+      this.raw.close();
+      throw error;
+    }
   }
 
   public maintenance(config: MaintenanceCommand['payload']) {
     return this.retention.maintenance(config);
   }
 
-  public execute(command: Exclude<TrafficAuditWorkerCommand, MaintenanceCommand>): unknown {
+  public shouldPruneAfterIpcInsert(): boolean {
+    return this.retention.shouldPruneAfterIpcInsert();
+  }
+
+  public shouldPruneIpc(): boolean {
+    return this.retention.shouldPruneIpc();
+  }
+
+  public pruneIpc() {
+    return this.retention.pruneIpc();
+  }
+
+  public execute(
+    command: Exclude<TrafficAuditWorkerCommand, MaintenanceCommand>,
+    maxDiskBytes = DEFAULT_APP_CONFIG.proxy.traffic_audit.max_disk_mib * 1024 * 1024,
+    capture?: AuditCaptureGeneration,
+  ): unknown {
+    if (command.operation === 'insertParent' || command.operation === 'adminEvent') {
+      const scope = command.operation === 'adminEvent' ? 'system' : command.payload.trafficClass;
+      if (capture && capture.trafficClass !== scope) {
+        throw new Error('Invalid audit capture scope');
+      }
+      if ((capture?.generation ?? 0) < this.generations[scope]) {
+        return 0;
+      }
+    }
+    const previous = this.activeDiskBudget;
+    this.activeDiskBudget = maxDiskBytes;
+    try {
+      switch (command.operation) {
+        case 'insertParent':
+        case 'insertAttempt':
+        case 'beginPayload':
+        case 'appendPayloadChunk':
+        case 'drop':
+        case 'adminEvent':
+          this.diskBudget.assertCanWrite(
+            Buffer.byteLength(JSON.stringify(command.payload), 'utf8'),
+            maxDiskBytes,
+          );
+          break;
+        case 'completeParent':
+        case 'completeAttempt':
+        case 'finalizePayload':
+        case 'finalizeSsePayload':
+          this.diskBudget.assertCanWrite(
+            Buffer.byteLength(JSON.stringify(command.payload), 'utf8'),
+            maxDiskBytes,
+            false,
+          );
+          break;
+      }
+      const result = this.executeCommand(command);
+      if ((command.operation === 'insertParent' || command.operation === 'adminEvent') && capture) {
+        this.generations[capture.trafficClass] = Math.max(
+          this.generations[capture.trafficClass],
+          capture.generation,
+        );
+      }
+      return result;
+    } catch (error) {
+      const failure = toAuditDiskAdmissionError(error) ?? error;
+      if (
+        failure instanceof AuditDiskAdmissionError &&
+        command.operation === 'appendPayloadChunk'
+      ) {
+        try {
+          this.diskBudget.assertCanWrite(0, maxDiskBytes, false);
+          this.payloads.markIncomplete(command.payload.payloadId, failure.reason);
+        } catch (metadataError) {
+          // The original rejection remains authoritative when even its metadata cannot commit.
+          throw new AuditDiskAdmissionError(
+            failure.reason,
+            {
+              cause: new AggregateError(
+                [failure, metadataError],
+                'Audit rejection metadata could not be persisted',
+              ),
+            },
+            true,
+          );
+        }
+      }
+      throw failure;
+    } finally {
+      this.activeDiskBudget = previous;
+    }
+  }
+
+  private executeCommand(command: Exclude<TrafficAuditWorkerCommand, MaintenanceCommand>): unknown {
     switch (command.operation) {
       case 'insertParent':
         return this.insertParent(command.payload);
@@ -92,6 +201,18 @@ export class TrafficAuditRepository {
         return this.queries.list(command.payload);
       case 'filterOptions':
         return this.queries.filterOptions();
+      case 'sessionSnapshot':
+        return auditSessionSnapshot(this.raw, this.queries, command.payload.sessionId);
+      case 'usageRange':
+        return readUsageRange(this.raw, command.payload);
+      case 'usageTrends':
+        return readUsageTrends(this.raw, this.orm, command.payload);
+      case 'usageActivity':
+        return readRequestActivity(this.orm, command.payload);
+      case 'usageOverview':
+        return readUsageOverview(this.raw, command.payload);
+      case 'sessionOptions':
+        return readAuditSessionOptions(this.raw, command.payload);
       case 'detail':
         return this.queries.detail(command.payload.id);
       case 'bodyPage':
@@ -107,50 +228,8 @@ export class TrafficAuditRepository {
         }
         return this.orm.delete(requestLogs).where(eq(requestLogs.id, command.payload.id)).run()
           .changes;
-      case 'clear': {
-        const deleted = this.raw.transaction(() => {
-          if (command.payload.trafficClass === 'system') {
-            const requests =
-              this.orm
-                .select({ value: count() })
-                .from(requestLogs)
-                .where(eq(requestLogs.trafficClass, 'system'))
-                .get()?.value ?? 0;
-            const events =
-              this.orm.select({ value: count() }).from(auditAdminEvents).get()?.value ?? 0;
-            this.orm.delete(requestLogs).where(eq(requestLogs.trafficClass, 'system')).run();
-            this.orm.delete(auditAdminEvents).run();
-            this.orm.delete(auditDropStats).where(eq(auditDropStats.trafficClass, 'system')).run();
-            return requests + events;
-          }
-          if (command.payload.trafficClass) {
-            const rows =
-              this.orm
-                .select({ value: count() })
-                .from(requestLogs)
-                .where(eq(requestLogs.trafficClass, command.payload.trafficClass))
-                .get()?.value ?? 0;
-            this.orm
-              .delete(requestLogs)
-              .where(eq(requestLogs.trafficClass, command.payload.trafficClass))
-              .run();
-            this.orm
-              .delete(auditDropStats)
-              .where(eq(auditDropStats.trafficClass, command.payload.trafficClass))
-              .run();
-            return rows;
-          }
-          const rows = this.orm.select({ value: count() }).from(requestLogs).get()?.value ?? 0;
-          const events =
-            this.orm.select({ value: count() }).from(auditAdminEvents).get()?.value ?? 0;
-          this.orm.delete(requestLogs).run();
-          this.orm.delete(auditAdminEvents).run();
-          this.orm.delete(auditDropStats).run();
-          return rows + events;
-        })();
-        this.retention.reclaimDiskSpaceDirect();
-        return deleted;
-      }
+      case 'clear':
+        return this.clearRecords(command.payload);
       case 'resetDropStats': {
         if (command.payload.trafficClass) {
           return this.orm
@@ -169,6 +248,36 @@ export class TrafficAuditRepository {
     }
   }
 
+  private clearRecords(
+    payload: Extract<TrafficAuditWorkerCommand, { operation: 'clear' }>['payload'],
+  ): number {
+    const { trafficClass } = payload;
+    const affected = this.orm.transaction((tx) => {
+      const requests = trafficClass ? eq(requestLogs.trafficClass, trafficClass) : undefined;
+      const drops = trafficClass ? eq(auditDropStats.trafficClass, trafficClass) : undefined;
+      const clearsAdminEvents = !trafficClass || trafficClass === 'system';
+      const requestCount =
+        tx.select({ value: count() }).from(requestLogs).where(requests).get()?.value ?? 0;
+      const eventCount = clearsAdminEvents
+        ? (tx.select({ value: count() }).from(auditAdminEvents).get()?.value ?? 0)
+        : 0;
+
+      tx.delete(requestLogs).where(requests).run();
+      if (clearsAdminEvents) {
+        tx.delete(auditAdminEvents).run();
+      }
+      tx.delete(auditDropStats).where(drops).run();
+      return requestCount + eventCount;
+    });
+    for (const scope of payload.trafficClass ? [payload.trafficClass] : AUDIT_TRAFFIC_CLASSES) {
+      this.generations[scope] = Math.max(
+        this.generations[scope],
+        payload.generations?.[scope] ?? this.generations[scope] + 1,
+      );
+    }
+    this.retention.reclaimDiskSpaceDirect();
+    return affected;
+  }
   private insertParent(
     payload: Extract<TrafficAuditWorkerCommand, { operation: 'insertParent' }>['payload'],
   ): number {
@@ -181,17 +290,23 @@ export class TrafficAuditRepository {
   private completeParent(
     payload: Extract<TrafficAuditWorkerCommand, { operation: 'completeParent' }>['payload'],
   ): number {
-    const attributedAttempt = this.raw
-      .prepare<
-        [string],
-        { accountId: string | null; model: string | null }
-      >('SELECT account_id accountId, model FROM upstream_attempts WHERE parent_id=? ' + "ORDER BY CASE WHEN outcome='completed' AND status BETWEEN 200 AND 299 THEN 0 ELSE 1 END, " + 'attempt_index DESC LIMIT 1')
-      .get(payload.id);
+    const successful = and(
+      eq(upstreamAttempts.outcome, 'completed'),
+      between(upstreamAttempts.status, 200, 299),
+    );
+    const attributedAttempt = this.orm
+      .select({ accountId: upstreamAttempts.accountId, model: upstreamAttempts.model })
+      .from(upstreamAttempts)
+      .where(eq(upstreamAttempts.parentId, payload.id))
+      .orderBy(sql`case when ${successful} then 0 else 1 end`, desc(upstreamAttempts.attemptIndex))
+      .limit(1)
+      .get();
     return this.orm
       .update(requestLogs)
       .set({
         attributedAccountId: attributedAttempt?.accountId ?? null,
         cachedTokens: payload.cachedTokens,
+        ...(payload.sessionId === undefined ? {} : { sessionId: payload.sessionId }),
         completedAt: payload.completedAt,
         durationMs: payload.durationMs,
         error: payload.error,
@@ -217,27 +332,23 @@ export class TrafficAuditRepository {
   private insertAttempt(
     payload: Extract<TrafficAuditWorkerCommand, { operation: 'insertAttempt' }>['payload'],
   ): number {
-    return this.raw.transaction(() => {
-      const changes = this.orm
+    return this.orm.transaction((tx) => {
+      const parent = eq(requestLogs.id, payload.parentId);
+      if (!tx.select({ id: requestLogs.id }).from(requestLogs).where(parent).get()) {
+        return 0;
+      }
+      const changes = tx
         .insert(upstreamAttempts)
         .values({ ...payload, outcome: 'in_progress' })
         .run().changes;
       if (payload.model) {
-        const current = this.orm
-          .select({ mappedModel: requestLogs.mappedModel })
-          .from(requestLogs)
-          .where(eq(requestLogs.id, payload.parentId))
-          .get();
-        if (current?.mappedModel === null) {
-          this.orm
-            .update(requestLogs)
-            .set({ mappedModel: payload.model })
-            .where(eq(requestLogs.id, payload.parentId))
-            .run();
-        }
+        tx.update(requestLogs)
+          .set({ mappedModel: payload.model })
+          .where(and(parent, isNull(requestLogs.mappedModel)))
+          .run();
       }
       return changes;
-    })();
+    });
   }
 
   private completeAttempt(
@@ -246,10 +357,15 @@ export class TrafficAuditRepository {
     return this.orm
       .update(upstreamAttempts)
       .set({
+        timingJson: payload.timing ? JSON.stringify(payload.timing) : null,
         completedAt: payload.completedAt,
         durationMs: payload.durationMs,
         error: payload.error,
         outcome: payload.outcome,
+        inputTokens: payload.inputTokens,
+        outputTokens: payload.outputTokens,
+        cachedTokens: payload.cachedTokens,
+        reasoningTokens: payload.reasoningTokens,
         responseHeaders: payload.responseHeaders,
         responsePartial: Boolean(payload.responsePartial),
         status: payload.status,

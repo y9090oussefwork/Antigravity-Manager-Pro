@@ -118,7 +118,7 @@ async function closeDesktop(desktop) {
   const closed = once(desktop.child, 'exit');
   const session = await desktop.browser.newBrowserCDPSession();
   // Electron's Browser.close invokes Browser::Quit, including the before-quit drain.
-  void session.send('Browser.close').catch(() => undefined);
+  session.send('Browser.close').catch(() => undefined);
   await Promise.race([
     closed,
     wait(40_000, undefined, { ref: false }).then(() => {
@@ -138,7 +138,8 @@ function runCli(command) {
       cwd: directory,
       encoding: 'utf8',
       windowsHide: true,
-      timeout: 25_000,
+      // Allow the CLI's 90-second startup deadline to report its own outcome.
+      timeout: command === 'start' ? 100_000 : 25_000,
       maxBuffer: 8000,
     },
   );
@@ -300,11 +301,16 @@ try {
     }
   });
   console.log('Attached core endpoint release observed.');
+  console.log('Closing the desktop attached to the terminated core.');
   await closeDesktop(lostCoreDesktop);
+  console.log('Probing ownership after the original desktop exited.');
   assert.equal(await connection.probe(), null);
+  console.log('Launching the desktop after core loss.');
   const afterCoreCrash = await launch();
+  console.log('Probing ownership after the replacement desktop became ready.');
   assert.equal((await connection.probe()).kind, 'core');
   await closeDesktop(afterCoreCrash);
+  console.log('Probing ownership after the replacement desktop exited.');
   assert.equal(await connection.probe(), null);
   console.log(
     'Actual core loss while Electron is attached and subsequent standalone-core restart passed.',

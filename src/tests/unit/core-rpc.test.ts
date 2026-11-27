@@ -14,12 +14,15 @@ import { openCodeOwner } from '@/modules/proxy-gateway/opencode-sync/opencode-ow
 import { localAccountOwner } from '@/modules/account/services/local-account-owner.service';
 import fs from 'node:fs/promises';
 import http from 'node:http';
+import Fastify from 'fastify';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ManagementServer } from '@/core/management/server';
 import { ManagementClient, ServiceNotRunningError } from '@/core/management/client';
 import { CoreRpcClient } from '@/core/rpc/client';
+import { registerCoreRpcRoutes } from '@/core/rpc/server';
+import { IPC_CAPTURE_HEADER } from '@/modules/proxy-gateway/audit/ipc-capture.schema';
 import { CoreRpcTransportError, createLocalRpcFetch } from '@/core/rpc/local-fetch';
 import { PLAYGROUND_RPC_MAX_REQUEST_BYTES } from '@/modules/proxy-gateway/playground/playground.schema';
 import { createCoreRpcOperations, type CoreRpcOperations } from '@/core/rpc/router';
@@ -92,6 +95,14 @@ function operations(): CoreRpcOperations {
   return {
     playground: { execute: vi.fn(), compare: vi.fn() },
     diagnosticLogs: vi.fn(),
+    errorDiagnostics: {
+      status: vi.fn(),
+      query: vi.fn(),
+      open: vi.fn(),
+      readContent: vi.fn(),
+      closeContent: vi.fn(),
+      clear: vi.fn(),
+    },
     errorReporting: { setEnabled: vi.fn() },
     ipcCapture: ipcCaptureOwner,
     auditFile: auditFileOwner,
@@ -115,6 +126,7 @@ function operations(): CoreRpcOperations {
       discard: vi.fn(),
       getPostImportStatus: vi.fn(),
     },
+    importCloudAccountCredential: vi.fn(),
     accountSwitchStatus: vi.fn(),
     accountEvents: () => ({ epoch: '11111111-1111-4111-8111-111111111111', latest: 0, events: [] }),
     monitor: {
@@ -170,6 +182,12 @@ function operations(): CoreRpcOperations {
     accountClearServiceDisabled: vi.fn(),
     accountSyncFromIde: vi.fn(async () => accountView),
     accountSetProxy: vi.fn(async () => ({ success: true as const })),
+    accountSetRouting: vi.fn(async () => ({ success: true as const })),
+    accountProjectId: {
+      getAccountProjectId: vi.fn(async () => ({ projectId: null })),
+      setAccountProjectId: vi.fn(async (input) => ({ projectId: input.projectId })),
+      fetchAccountProjectId: vi.fn(async () => ({ projectId: 'discovered-project' })),
+    },
     accountDelete: vi.fn(async () => ({ success: true as const })),
     oauthClientList: vi.fn(() => [
       {
@@ -188,18 +206,34 @@ function operations(): CoreRpcOperations {
       base_url: `http://localhost:${port}`,
     })),
     gatewayStop: vi.fn(async () => ({ success: true as const })),
+    gatewayManualStart: vi.fn(),
+    gatewayManualStop: vi.fn(),
+    gatewayRetrySaveChoice: vi.fn(),
+    clientConfig: { status: vi.fn(), preview: vi.fn(), mutate: vi.fn() },
+    connectionProfiles: {
+      list: vi.fn(),
+      save: vi.fn(),
+      preview: vi.fn(),
+      mutate: vi.fn(),
+      delete: vi.fn(),
+    },
   };
 }
 
-it('transports only a core-sanitized log snapshot over the private pipe within its existing response cap', async () => {
+it('transports shareable and sanitized mixed core logs within the private pipe response cap', async () => {
   const socketPath = await endpoint();
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'agm-log-rpc-'));
   directories.push(dir);
   const until = Date.now();
   const date = new Date(until);
-  const filename = `core-${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}.log`;
+  const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   const raw = `[${date.toISOString()}] [ERROR] private@example.invalid {"code":"ECONNRESET","status":502,"prompt":"synthetic-private-prompt"}\n`;
-  await fs.writeFile(path.join(dir, filename), raw.repeat(12000));
+  const diagnostic = 'Proxy could not start on port 8045 (EADDRINUSE)';
+  await fs.writeFile(path.join(dir, `core-${day}.log`), raw.repeat(12000));
+  await fs.writeFile(
+    path.join(dir, `core-diagnostic-${day}.log`),
+    `[${date.toISOString()}] [WARN] ${diagnostic}\n`,
+  );
   const rpc = operations();
   rpc.diagnosticLogs = (time) => readDiagnosticLogs('core', time, dir);
   const server = new ManagementServer({
@@ -220,8 +254,37 @@ it('transports only a core-sanitized log snapshot over the private pipe within i
   expect(result.truncated).toBe(true);
   expect(result.records).toBeGreaterThan(0);
   expect(result.text).not.toMatch(/private@example|synthetic-private-prompt/);
+  expect(result.text).toContain(diagnostic);
   expect(result.text).toContain('{"code":"ECONNRESET","status":502}');
   expect(Buffer.byteLength(result.text)).toBeLessThanOrEqual(LOG_SOURCE_MAX_BYTES);
+});
+
+it('imports a pasted Google credential through the selected profile owner', async () => {
+  const socketPath = await endpoint();
+  const importCredential = vi.fn(async () => ({
+    status: 'added' as const,
+    email: 'imported@example.test',
+  }));
+  const server = new ManagementServer({
+    endpoint: socketPath,
+    getStatus: () => ({
+      state: 'running',
+      pid: process.pid,
+      gateway: { running: false, port: null },
+    }),
+    shutdown: async () => {},
+    onShutdownError: vi.fn(),
+    rpc: { ...operations(), importCloudAccountCredential: importCredential },
+  });
+  closeables.push(server);
+  await server.start();
+
+  const input = { refreshToken: 'dummy-refresh-core', oauthClientKey: 'test-client' };
+  expect(await new CoreRpcClient(socketPath).importCloudAccountCredential(input)).toEqual({
+    status: 'added',
+    email: 'imported@example.test',
+  });
+  expect(importCredential).toHaveBeenCalledExactlyOnceWith(input);
 });
 
 describe('core application RPC', () => {
@@ -442,6 +505,85 @@ describe('core application RPC', () => {
     owner.closeAdmission();
     await owner.drain();
   });
+  it('drains disconnected captures after their admitted business work completes', async () => {
+    const completeParent = vi.fn();
+    const owner = createIpcCaptureOwner({
+      startParent: () => ({ id: 'disconnected-parent', startedAt: 1, trafficClass: 'ipc' }),
+      completeParent,
+      beginPreparedParentPayload: () => ({
+        append: async () => true,
+        finish: async () => {},
+      }),
+    });
+    const capability = (
+      await owner.begin({
+        path: 'cloud/list',
+        sessionId: null,
+        model: null,
+      })
+    ).capability;
+    const rpc = operations();
+    rpc.ipcCapture = owner;
+    const entered = Promise.withResolvers<void>();
+    const result = Promise.withResolvers<Awaited<ReturnType<CoreRpcOperations['gatewayStatus']>>>();
+    rpc.gatewayStatus = () => {
+      entered.resolve();
+      return result.promise;
+    };
+    const server = Fastify();
+    closeables.push(server);
+    const disconnected = Promise.withResolvers<void>();
+    server.addHook('onRequest', async (_request, reply) => {
+      reply.raw.once('close', disconnected.resolve);
+    });
+    registerCoreRpcRoutes(
+      server,
+      () => ({ state: 'running', pid: 123, gateway: { running: false, port: null } }),
+      () => false,
+      rpc,
+    );
+    const socketPath = await endpoint();
+    await server.listen({ path: socketPath });
+    const request = http.request({
+      socketPath,
+      path: '/rpc/gatewayStatus',
+      method: 'POST',
+      headers: { [IPC_CAPTURE_HEADER]: capability.epoch + '.' + capability.token },
+    });
+    request.on('error', () => {});
+    request.end();
+    try {
+      await entered.promise;
+      request.destroy();
+      await disconnected.promise;
+      owner.closeAdmission();
+      let drained = false;
+      const draining = owner.drain().then(() => {
+        drained = true;
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(drained).toBe(false);
+      result.resolve({
+        running: false,
+        port: 8045,
+        base_url: 'http://localhost:8045',
+        active_accounts: 0,
+      });
+      await draining;
+      expect(completeParent).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'disconnected-parent' }),
+        expect.objectContaining({ outcome: 'internal_error', status: 500 }),
+      );
+    } finally {
+      request.destroy();
+      result.resolve({
+        running: false,
+        port: 8045,
+        base_url: 'http://localhost:8045',
+        active_accounts: 0,
+      });
+    }
+  });
   it('round trips typed operations over the private management endpoint', async () => {
     const socketPath = await endpoint();
     const rpc = operations();
@@ -461,6 +603,26 @@ describe('core application RPC', () => {
     expect(await client.contextCacheStatus()).toEqual(rpc.contextCacheStatus());
     expect(await client.accountSummaries()).toEqual([account]);
     expect(await client.accountViews()).toEqual([accountView]);
+    const agyPreview = {
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      expiresAt: 60_000,
+      accounts: [],
+      validationFailures: [],
+      discoveryFailures: [],
+      merged: [],
+      sourceSummaries: [
+        {
+          id: 'antigravity-agy-file' as const,
+          candidateCount: 1,
+          failureCount: 0,
+          inspectedLocations: 1,
+        },
+      ],
+      duplicateCount: 0,
+      emailCollisionGroups: [],
+    };
+    vi.mocked(rpc.localImport.preview).mockResolvedValueOnce(agyPreview);
+    expect(await client.localImportPreview()).toEqual(agyPreview);
     expect(await client.accountSecurityStatus()).toEqual({
       state: 'secure',
       masterKeySource: 'keytar',
@@ -497,6 +659,29 @@ describe('core application RPC', () => {
     const proxyUrl = 'http://proxy-user:proxy-password@127.0.0.1:7890';
     expect(await client.setAccountProxy(account.id, proxyUrl)).toBeUndefined();
     expect(await client.setAccountProxy(account.id, null)).toBeUndefined();
+    const routing = {
+      accountId: account.id,
+      proxyEnabled: true,
+      proxyPriority: 50,
+      proxyPriorityOverrides: { gemini: 10, claude: 90 },
+    };
+    expect(await client.setAccountRouting(routing)).toBeUndefined();
+    expect(rpc.accountSetRouting).toHaveBeenCalledWith(routing);
+    const project = { accountId: account.id, expectedProjectId: null };
+    expect(await client.getAccountProjectId({ accountId: account.id })).toEqual({
+      projectId: null,
+    });
+    expect(await client.setAccountProjectId({ ...project, projectId: 'manual-project' })).toEqual({
+      projectId: 'manual-project',
+    });
+    expect(await client.fetchAccountProjectId(project)).toEqual({
+      projectId: 'discovered-project',
+    });
+    expect(rpc.accountProjectId.setAccountProjectId).toHaveBeenCalledWith({
+      ...project,
+      projectId: 'manual-project',
+    });
+    expect(rpc.accountProjectId.fetchAccountProjectId).toHaveBeenCalledWith(project);
     expect(await client.deleteCloudAccount(account.id)).toBeUndefined();
     expect(rpc.accountSetProxy).toHaveBeenCalledWith(account.id, proxyUrl);
     expect(rpc.accountSetProxy).toHaveBeenCalledWith(account.id, null);

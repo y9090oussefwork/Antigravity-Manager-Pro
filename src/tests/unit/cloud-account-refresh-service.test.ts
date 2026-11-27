@@ -10,6 +10,8 @@ import {
   OAuthTokenRefreshError,
 } from '@/modules/cloud-account/services/GoogleAPIService';
 import type { CloudAccount } from '@/modules/cloud-account/types';
+import { CloudAccountRefreshContextChangedError } from '@/modules/cloud-account/services/cloud-account-refresh-context';
+import { captureTokenWriteGuard } from '@/modules/cloud-account/services/cloud-account-refresh-writeback';
 import {
   evictNestServerAccountLeaseAccount,
   reloadNestServerAccountLeaseCache,
@@ -49,6 +51,13 @@ const request = {
   oauthClientKey: 'default',
 };
 
+const leaseContext = {
+  email: 'user@example.com',
+  refreshToken: 'refresh-token',
+  oauthClientKey: 'default',
+  proxyUrl: undefined,
+};
+
 function invalidGrantError(): OAuthTokenRefreshError {
   return new OAuthTokenRefreshError('invalid_grant', 400, 'default', 'expired or revoked');
 }
@@ -75,7 +84,7 @@ describe('CloudAccountRefreshService', () => {
   let persistedAccount: CloudAccount;
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     CloudAccountRefreshService.resetStateForTesting();
     persistedAccount = createAccount();
     persistedAccount.token.oauth_client_key = 'default';
@@ -119,6 +128,7 @@ describe('CloudAccountRefreshService', () => {
     expect(updateNestServerAccountLeaseOAuthHealth).toHaveBeenCalledWith(
       'acc-1',
       expect.objectContaining({ invalid_grant_count: 1 }),
+      leaseContext,
     );
 
     CloudAccountRefreshService.resetStateForTesting();
@@ -138,8 +148,37 @@ describe('CloudAccountRefreshService', () => {
           reason: 'invalid_grant',
         }),
       }),
+      expect.any(Function),
     );
-    expect(evictNestServerAccountLeaseAccount).toHaveBeenCalledWith('acc-1');
+    expect(evictNestServerAccountLeaseAccount).toHaveBeenCalledWith('acc-1', leaseContext);
+  });
+
+  it('does not clear health or reload after a guarded import follow-up loses its token context', async () => {
+    persistedAccount.health = { oauth: { refresh_blocked: true, reason: 'invalid_grant' } };
+    const guard = captureTokenWriteGuard(persistedAccount);
+    persistedAccount.token = { ...persistedAccount.token, access_token: 'replacement-access' };
+    await expect(
+      CloudAccountRefreshService.clearFailureState('acc-1', guard),
+    ).rejects.toMatchObject({ name: 'CloudAccountRefreshContextChangedError' });
+    expect(persistedAccount.health.oauth?.refresh_blocked).toBe(true);
+    expect(CloudAccountRepo.updateHealth).not.toHaveBeenCalled();
+    expect(reloadNestServerAccountLeaseCache).not.toHaveBeenCalled();
+  });
+
+  it('rechecks a guarded import follow-up after loading the reload helper', async () => {
+    const guard = captureTokenWriteGuard(persistedAccount);
+    let reads = 0;
+    vi.mocked(CloudAccountRepo.getAccount).mockImplementation(async () => {
+      reads++;
+      if (reads === 3) {
+        persistedAccount.token = { ...persistedAccount.token, refresh_token: 'replacement-grant' };
+      }
+      return persistedAccount;
+    });
+    await expect(
+      CloudAccountRefreshService.clearFailureState('acc-1', guard),
+    ).rejects.toMatchObject({ name: 'CloudAccountRefreshContextChangedError' });
+    expect(reloadNestServerAccountLeaseCache).not.toHaveBeenCalled();
   });
 
   it('clears the first-failure confirmation after a successful refresh', async () => {
@@ -163,7 +202,11 @@ describe('CloudAccountRefreshService', () => {
       }),
     ).resolves.toMatchObject({ access_token: 'new-token' });
     expect(persistedAccount.health).toBeUndefined();
-    expect(updateNestServerAccountLeaseOAuthHealth).toHaveBeenCalledWith('acc-1', undefined);
+    expect(updateNestServerAccountLeaseOAuthHealth).toHaveBeenCalledWith(
+      'acc-1',
+      undefined,
+      leaseContext,
+    );
     await expect(CloudAccountRefreshService.refreshAccessToken(request)).rejects.toBeInstanceOf(
       OAuthTokenRefreshError,
     );
@@ -176,7 +219,7 @@ describe('CloudAccountRefreshService', () => {
   it('does not refresh after the OAuth client changes even if the refresh token is unchanged', async () => {
     persistedAccount.token.oauth_client_key = 'replacement-client';
     await expect(CloudAccountRefreshService.refreshAccessToken(request)).rejects.toThrow(
-      'Account credentials changed before token refresh',
+      CloudAccountRefreshContextChangedError,
     );
     expect(GoogleAPIService.refreshAccessToken).not.toHaveBeenCalled();
   });
@@ -188,7 +231,10 @@ describe('CloudAccountRefreshService', () => {
     await vi.waitFor(() => expect(GoogleAPIService.refreshAccessToken).toHaveBeenCalledOnce());
     persistedAccount.token = { ...persistedAccount.token, refresh_token: 'replacement' };
     response.reject(invalidGrantError());
-    await expect(pending).rejects.toBeInstanceOf(OAuthTokenRefreshError);
+    await expect(pending).rejects.toMatchObject({
+      name: 'CloudAccountRefreshContextChangedError',
+      cause: expect.any(OAuthTokenRefreshError),
+    });
     expect(persistedAccount.health?.oauth).toBeUndefined();
     expect(CloudAccountRepo.updateHealth).not.toHaveBeenCalled();
   });
@@ -206,11 +252,12 @@ describe('CloudAccountRefreshService', () => {
     });
     const first = CloudAccountRefreshService.refreshAccessToken(request);
     const second = CloudAccountRefreshService.refreshAccessToken(request);
+    const firstFailure = expect(first).rejects.toThrow(CloudAccountRefreshContextChangedError);
+    const secondFailure = expect(second).rejects.toThrow(CloudAccountRefreshContextChangedError);
     await vi.waitFor(() => expect(GoogleAPIService.refreshAccessToken).toHaveBeenCalledOnce());
     persistedAccount.token.refresh_token = 'replacement';
     gate.resolve();
-    await first;
-    await expect(second).rejects.toThrow('Account credentials changed before token refresh');
+    await Promise.all([firstFailure, secondFailure]);
     expect(GoogleAPIService.refreshAccessToken).toHaveBeenCalledOnce();
   });
 
@@ -224,7 +271,7 @@ describe('CloudAccountRefreshService', () => {
       }
 
       await expect(CloudAccountRefreshService.refreshAccessToken(request)).rejects.toThrow(
-        'Account credentials changed before token refresh',
+        CloudAccountRefreshContextChangedError,
       );
       expect(GoogleAPIService.refreshAccessToken).not.toHaveBeenCalled();
     },
@@ -287,7 +334,11 @@ describe('CloudAccountRefreshService', () => {
       value: expect.objectContaining({ access_token: 'new-token' }),
     });
     expect(persistedAccount.health).toBeUndefined();
-    expect(updateNestServerAccountLeaseOAuthHealth).toHaveBeenLastCalledWith('acc-1', undefined);
+    expect(updateNestServerAccountLeaseOAuthHealth).toHaveBeenLastCalledWith(
+      'acc-1',
+      undefined,
+      leaseContext,
+    );
   });
 
   it('serializes cache side effects with the OAuth state transition that caused them', async () => {

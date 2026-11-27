@@ -4,56 +4,48 @@ import { logger } from '@/shared/logging/logger';
 import { accounts } from '@/shared/persistence/database/schema';
 import { getCloudDb } from './cloud-account-db';
 import {
-  serializeDeviceHistory,
-  serializeDeviceProfile,
-} from './cloud-account-device-profile-codec';
+  assertImportPlanCurrent,
+  cloudAccountImportUpdateValues,
+  cloudAccountRowValues,
+} from './cloud-account-import-guard';
 
 /**
  * Persist one prepared import plan in a single SQLite transaction.
  *
  * Callers must preserve account-owned fields before invoking this function.
+ * Preserve the stored Google identity only when the guarded import keeps the same grant.
  * Unlike CloudAccountRepo.addAccount(), this writer never changes unrelated
  * active-account rows because a background batch import must not switch users.
  */
 export async function upsertCloudAccountsAtomically(
   accountsToPersist: CloudAccount[],
+  expectedAccounts?: CloudAccount[],
 ): Promise<void> {
   if (accountsToPersist.length === 0) {
     return;
   }
 
+  const expectedById = new Map(expectedAccounts?.map((account) => [account.id, account]));
   const valuesToPersist = accountsToPersist.map((account) => {
     CloudAccountSchema.parse(account);
-    return {
-      id: account.id,
-      provider: account.provider,
-      email: account.email,
-      name: account.name ?? null,
-      avatarUrl: account.avatar_url ?? null,
-      tokenJson: JSON.stringify(account.token),
-      quotaJson: account.quota ? JSON.stringify(account.quota) : null,
-      healthJson: account.health ? JSON.stringify(account.health) : null,
-      deviceProfileJson: serializeDeviceProfile(account.device_profile),
-      deviceHistoryJson: serializeDeviceHistory(account.device_history),
-      createdAt: account.created_at,
-      lastUsed: account.last_used,
-      status: account.status ?? 'active',
-      statusReason: account.status_reason ?? null,
-      isActive: account.is_active ? 1 : 0,
-      proxyUrl: account.proxy_url ?? null,
-    };
+    const values = cloudAccountRowValues(account);
+    const update = cloudAccountImportUpdateValues(account, values, expectedById.get(account.id));
+    return { values, update };
   });
 
   const { raw, orm } = getCloudDb();
   try {
     orm.transaction((transaction) => {
-      for (const values of valuesToPersist) {
+      if (expectedAccounts) {
+        assertImportPlanCurrent(transaction, accountsToPersist, expectedAccounts);
+      }
+      for (const { values, update } of valuesToPersist) {
         transaction
           .insert(accounts)
           .values(values)
           .onConflictDoUpdate({
             target: accounts.id,
-            set: values,
+            set: update,
           })
           .run();
       }

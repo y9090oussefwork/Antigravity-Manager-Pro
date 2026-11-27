@@ -5,7 +5,7 @@ import { logger } from '@/shared/logging/logger';
 import { projectCloudAccountView } from '@/modules/cloud-account/services/cloud-account-view';
 import type { CloudAccount } from '@/modules/cloud-account/types';
 import { getProfilesBaseDir } from '@/shared/platform/paths';
-import { WorkspaceProfileRepo } from '../persistence/workspace-profile-repo';
+import { WorkspaceProfileRepo, normalizeWorkspaceAccountIds } from '../persistence/workspace-profile-repo';
 import {
   CreateWorkspaceProfileInputSchema,
   UpdateWorkspaceProfileInputSchema,
@@ -91,6 +91,11 @@ export function createWorkspaceProfileService(deps: WorkspaceProfileServiceDepen
       for (const [index, profile] of profiles.entries()) {
         const boundAccount = accountMap.get(profile.accountId);
         const accountView = boundAccount ? projectCloudAccountView(boundAccount) : undefined;
+        const poolIds = profile.accountIds?.length ? profile.accountIds : [profile.accountId];
+        const assignedAccounts = poolIds
+          .map((id) => accountMap.get(id))
+          .filter((acc): acc is CloudAccount => Boolean(acc))
+          .map((acc) => projectCloudAccountView(acc));
 
         const status = statuses[index] ?? { running: false, unknown: true };
 
@@ -98,6 +103,7 @@ export function createWorkspaceProfileService(deps: WorkspaceProfileServiceDepen
           ...profile,
           status,
           account: accountView,
+          accounts: assignedAccounts,
         });
       }
 
@@ -113,7 +119,23 @@ export function createWorkspaceProfileService(deps: WorkspaceProfileServiceDepen
         return null;
       }
 
-      const boundAccount = await deps.cloudAccountRepo.getAccount(profile.accountId);
+      const poolIds = profile.accountIds?.length ? profile.accountIds : [profile.accountId];
+      let boundAccount: CloudAccount | null = null;
+      let assignedAccounts: ReturnType<typeof projectCloudAccountView>[] = [];
+      if (poolIds.length > 1) {
+        const allAccounts = await deps.cloudAccountRepo.getAccounts();
+        const accountMap = new Map(allAccounts.map((acc) => [acc.id, acc]));
+        boundAccount = accountMap.get(profile.accountId) ?? null;
+        assignedAccounts = poolIds
+          .map((accId) => accountMap.get(accId))
+          .filter((acc): acc is CloudAccount => Boolean(acc))
+          .map((acc) => projectCloudAccountView(acc));
+      } else {
+        boundAccount = await deps.cloudAccountRepo.getAccount(profile.accountId);
+        if (boundAccount) {
+          assignedAccounts = [projectCloudAccountView(boundAccount)];
+        }
+      }
       const accountView = boundAccount ? projectCloudAccountView(boundAccount) : undefined;
 
       let status: WorkspaceProfileStatus = { running: false, unknown: true };
@@ -129,6 +151,7 @@ export function createWorkspaceProfileService(deps: WorkspaceProfileServiceDepen
         ...profile,
         status,
         account: accountView,
+        accounts: assignedAccounts,
       };
     },
 
@@ -147,6 +170,25 @@ export function createWorkspaceProfileService(deps: WorkspaceProfileServiceDepen
         );
       }
 
+      let normalizedAccountIds: string[] | undefined;
+      if (validatedInput.accountIds) {
+        normalizedAccountIds = normalizeWorkspaceAccountIds(
+          validatedInput.accountId,
+          validatedInput.accountIds,
+        );
+        for (const extraAccountId of normalizedAccountIds) {
+          if (extraAccountId === validatedInput.accountId) {
+            continue;
+          }
+          const extraAccount = await deps.cloudAccountRepo.getAccount(extraAccountId);
+          if (!extraAccount) {
+            throw new WorkspaceValidationError(
+              `Assigned Google Account "${extraAccountId}" does not exist in the account pool`,
+            );
+          }
+        }
+      }
+
       // Verify project path is an absolute path
       if (!path.isAbsolute(validatedInput.projectPath)) {
         throw new WorkspaceValidationError(
@@ -154,7 +196,10 @@ export function createWorkspaceProfileService(deps: WorkspaceProfileServiceDepen
         );
       }
 
-      return deps.profileRepo.createProfile(validatedInput);
+      return deps.profileRepo.createProfile({
+        ...validatedInput,
+        accountIds: normalizedAccountIds,
+      });
     },
 
     /**
@@ -170,6 +215,20 @@ export function createWorkspaceProfileService(deps: WorkspaceProfileServiceDepen
           throw new WorkspaceValidationError(
             `Target Google Account "${validatedInput.accountId}" does not exist`,
           );
+        }
+      }
+
+      if (validatedInput.accountIds !== undefined) {
+        for (const candidateId of validatedInput.accountIds) {
+          if (candidateId === validatedInput.accountId) {
+            continue;
+          }
+          const candidateAccount = await deps.cloudAccountRepo.getAccount(candidateId);
+          if (!candidateAccount) {
+            throw new WorkspaceValidationError(
+              `Assigned Google Account "${candidateId}" does not exist`,
+            );
+          }
         }
       }
 

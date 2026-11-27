@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_APP_CONFIG, type ProxyConfig } from '@/modules/config/types';
 import { setServerConfig } from '../../server/server-config';
-import { AccountLeaseService } from '../../modules/proxy-gateway/server/modules/account-lease/account-lease.service';
+import { AccountLeaseService } from '../../server/gateway/modules/account-lease/account-lease.service';
 import { CloudAccountRepo } from '@/modules/cloud-account/persistence/cloudHandler';
 import { GoogleAPIService } from '@/modules/cloud-account/services/GoogleAPIService';
 import { CloudAccountHealthService } from '@/modules/cloud-account/services/CloudAccountHealthService';
@@ -178,7 +178,7 @@ describe('AccountLeaseService parity scheduling replay', () => {
         preferred_account_id: 'acc-2',
       }),
     );
-    expect((await service.getNextToken({ model: 'gemini-2.5-flash' }))?.id).toBe('acc-2');
+    expect((await service.getNextToken({ model: 'gemini-3-flash' }))?.id).toBe('acc-2');
   });
 
   it('rotates sticky account when limited in balance mode', async () => {
@@ -192,18 +192,18 @@ describe('AccountLeaseService parity scheduling replay', () => {
     );
     const first = await service.getNextToken({
       sessionKey: 'openai:user-1',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash',
     });
     expect(first?.id).toBe('acc-1');
     await service.markFromUpstreamError({
       accountIdOrEmail: 'acc-1',
       status: 429,
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash',
       body: JSON.stringify({ error: { details: [{ reason: 'RATE_LIMIT_EXCEEDED' }] } }),
     });
     const second = await service.getNextToken({
       sessionKey: 'openai:user-1',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash',
     });
     expect(second?.id).toBe('acc-2');
   });
@@ -219,14 +219,15 @@ describe('AccountLeaseService parity scheduling replay', () => {
     await service.markFromUpstreamError({
       accountIdOrEmail: 'acc-1',
       status: 429,
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash',
       body: JSON.stringify({
         error: { details: [{ reason: 'QUOTA_EXHAUSTED', metadata: { quotaResetDelay: '30s' } }] },
       }),
     });
-    expect((await service.getNextToken({ model: 'gemini-2.5-flash' }))?.id).toBe('acc-2');
+    expect((await service.getNextToken({ model: 'gemini-3-flash' }))?.id).toBe('acc-2');
     expect(
-      (await service.getNextToken({ model: 'gemini-2.5-pro', excludeAccountIds: ['acc-2'] }))?.id,
+      (await service.getNextToken({ model: 'gemini-3.1-pro-low', excludeAccountIds: ['acc-2'] }))
+        ?.id,
     ).toBe('acc-1');
   });
 
@@ -234,6 +235,13 @@ describe('AccountLeaseService parity scheduling replay', () => {
     setServerConfig(createProxyConfig({ parity_enabled: false, parity_kill_switch: false }));
     await seedAccounts([leaseAccount('acc-1')]);
     expect(await service.getNextToken({ excludeAccountIds: ['acc-1'] })).toBeNull();
+  });
+
+  it('moves to a second eligible account after the preferred stored account disappears', async () => {
+    setServerConfig(createProxyConfig({ preferred_account_id: 'acc-1' }));
+    fixture.accounts.delete('acc-1');
+    const lease = await service.getNextToken({ model: 'gemini-3-flash' });
+    expect(lease?.id).toBe('acc-2');
   });
 
   it('does not issue a cached lease after its persisted account is deleted', async () => {

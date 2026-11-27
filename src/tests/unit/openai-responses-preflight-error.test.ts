@@ -1,8 +1,8 @@
 import type { FastifyReply } from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { OpenAIOperations } from '@/modules/proxy-gateway/server/modules/openai/openai-operations.service';
-import { proxyModelAvailabilityStore } from '@/modules/proxy-gateway/server/shared/services/model-availability.service';
+import { OpenAIOperations } from '@/server/gateway/modules/openai/openai-operations.service';
+import { proxyModelAvailabilityStore } from '@/server/gateway/shared/services/model-availability.service';
 import {
   createAccount,
   createGateway,
@@ -101,7 +101,7 @@ describe('OpenAI Responses preflight errors', () => {
     expect(reply.body).toMatchObject({
       error: {
         message: expect.stringMatching(/input_audio must be an object/),
-        type: 'server_error',
+        type: 'invalid_request_error',
       },
     });
     expect(upstream.calls).toHaveLength(0);
@@ -134,7 +134,7 @@ describe('OpenAI Responses preflight errors', () => {
     expect(reply.body).toMatchObject({
       error: {
         message: 'Input image contains invalid base64 data',
-        type: 'server_error',
+        type: 'invalid_request_error',
       },
     });
     expect(upstream.calls).toHaveLength(0);

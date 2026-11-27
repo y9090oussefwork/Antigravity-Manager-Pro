@@ -38,7 +38,6 @@ import {
   CloudAccountLoadError,
   CloudAccountLoadingState,
 } from '@/modules/cloud-account/components/CloudAccountListFallbacks';
-import { CloudAccountListSummary } from '@/modules/cloud-account/components/CloudAccountListSummary';
 import { CloudAccountToolbar } from '@/modules/cloud-account/components/CloudAccountToolbar';
 import type { QuotaWindow } from '@/modules/cloud-account/utils/quota-groups';
 import {
@@ -57,6 +56,13 @@ import {
   readCompactQuotaSummaryPreference,
   saveCompactQuotaSummaryPreference,
 } from '@/modules/cloud-account/utils/compact-quota-preference';
+import {
+  countAccountsByModelCategory,
+  filterAccountsByModelCategory,
+  readAccountModelCategoryPreference,
+  saveAccountModelCategoryPreference,
+  type AccountModelCategory,
+} from '@/modules/cloud-account/utils/account-model-category';
 
 export function CloudAccountList() {
   return (
@@ -79,7 +85,7 @@ function CloudAccountListContent() {
     refetch,
   } = useCloudAccounts(warmupConfig?.enabled ? 60_000 : false);
   const { config, saveConfig } = useAppConfig();
-  const refreshMutation = useRefreshQuota();
+  const refreshMutation = useRefreshQuota(accounts);
   const deleteMutation = useDeleteCloudAccount();
   const switchMutation = useSwitchCloudAccount();
 
@@ -125,6 +131,13 @@ function CloudAccountListContent() {
     saveCompactQuotaSummaryPreference(() => window.localStorage, compactQuotaSummary);
   }, [compactQuotaSummary]);
 
+  const [modelCategory, setModelCategory] = useState<AccountModelCategory>(() =>
+    readAccountModelCategoryPreference(() => window.localStorage),
+  );
+  useEffect(() => {
+    saveAccountModelCategoryPreference(() => window.localStorage, modelCategory);
+  }, [modelCategory]);
+
   const [searchQuery, setSearchQuery] = useState('');
 
   const updateGridLayout = async (layout: GridLayout) => {
@@ -137,27 +150,26 @@ function CloudAccountListContent() {
 
   const {
     sortedAccounts,
-    manualRecommendation,
+    recommendationsByAccount,
     tierOptions,
     effectiveSelectedTierKeys,
     effectiveSelectedTierKeySet,
     hasActiveTierFilter,
     visibleAccountIds,
-    totalAccounts,
-    activeAccounts,
-    rateLimitedAccounts,
-    overallQuotaPercentage,
-    effectiveQuotaStatus,
-    overallWeeklyQuotaPercentage,
-    effectiveWeeklyQuotaStatus,
   } = useCloudAccountListView(accounts, config, currentSort);
+
+  const categoryCounts = useMemo(
+    () => countAccountsByModelCategory(sortedAccounts),
+    [sortedAccounts],
+  );
 
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
   const filteredAccounts = useMemo(() => {
+    const categorized = filterAccountsByModelCategory(sortedAccounts, modelCategory);
     if (!normalizedSearchQuery) {
-      return sortedAccounts;
+      return categorized;
     }
-    return sortedAccounts.filter((account) => {
+    return categorized.filter((account) => {
       const email = account.email?.toLowerCase() ?? '';
       const name = account.name?.toLowerCase() ?? '';
       const tier = account.quota?.subscription_tier?.toLowerCase() ?? '';
@@ -167,11 +179,14 @@ function CloudAccountListContent() {
         tier.includes(normalizedSearchQuery)
       );
     });
-  }, [sortedAccounts, normalizedSearchQuery]);
+  }, [sortedAccounts, modelCategory, normalizedSearchQuery]);
 
   const filteredVisibleAccountIds = useMemo(
-    () => (normalizedSearchQuery ? filteredAccounts.map((account) => account.id) : visibleAccountIds),
-    [filteredAccounts, normalizedSearchQuery, visibleAccountIds],
+    () =>
+      normalizedSearchQuery || modelCategory !== 'all'
+        ? filteredAccounts.map((account) => account.id)
+        : visibleAccountIds,
+    [filteredAccounts, modelCategory, normalizedSearchQuery, visibleAccountIds],
   );
 
   const { refreshSelectedAccounts, deleteSelectedAccounts } = useCloudAccountBatchActions({
@@ -406,16 +421,7 @@ function CloudAccountListContent() {
 
   return (
     <div data-slot="cloud-account-list" className="flex flex-col gap-6 pb-20">
-      <CloudAccountListSummary
-        totalAccounts={totalAccounts}
-        activeAccounts={activeAccounts}
-        rateLimitedAccounts={rateLimitedAccounts}
-        overallQuotaPercentage={overallQuotaPercentage}
-        effectiveQuotaStatus={effectiveQuotaStatus}
-        overallWeeklyQuotaPercentage={overallWeeklyQuotaPercentage}
-        effectiveWeeklyQuotaStatus={effectiveWeeklyQuotaStatus}
-        isMinimalMode={isMinimalMode}
-      />
+      <h1 className="sr-only">{t('cloud.title')}</h1>
 
       <CloudAccountToolbar
         visibleAccountIds={filteredVisibleAccountIds}
@@ -433,6 +439,8 @@ function CloudAccountListContent() {
         quotaGroupVisibility={quotaGroupVisibility}
         isMinimalMode={isMinimalMode}
         compactQuotaSummary={compactQuotaSummary}
+        modelCategory={modelCategory}
+        categoryCounts={categoryCounts}
         searchQuery={searchQuery}
         getTierOptionLabel={getTierOptionLabel}
         onToggleAutoSwitch={handleToggleAutoSwitch}
@@ -453,6 +461,7 @@ function CloudAccountListContent() {
         onQuotaGroupVisibilityChange={setQuotaGroupVisibility}
         onToggleMinimalMode={setIsMinimalMode}
         onToggleCompactQuotaSummary={setCompactQuotaSummary}
+        onModelCategoryChange={setModelCategory}
         onSearchQueryChange={setSearchQuery}
       />
 
@@ -464,7 +473,7 @@ function CloudAccountListContent() {
         quotaGroupVisibility={quotaGroupVisibility}
         isMinimalMode={isMinimalMode}
         compactQuotaSummary={compactQuotaSummary}
-        manualRecommendation={manualRecommendation}
+        recommendationsByAccount={recommendationsByAccount}
         hasActiveTierFilter={hasActiveTierFilter}
         refreshingAccountId={refreshingAccountId}
         deletingAccountId={deletingAccountId}

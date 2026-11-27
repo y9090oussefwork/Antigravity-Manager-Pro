@@ -1,5 +1,4 @@
 import { useMemo } from 'react';
-import { filter, flatMap, isEmpty, size, sumBy } from 'lodash-es';
 import type { CloudAccountView } from '@/modules/cloud-account/services/cloud-account-view';
 import type { AppConfig } from '@/modules/config/types';
 import {
@@ -8,18 +7,11 @@ import {
   getEffectiveSelectedTierKeys,
   type AccountTierOption,
 } from '@/modules/cloud-account/utils/account-tier-filter';
+import type { AccountSortKey } from '@/modules/cloud-account/utils/quota-display';
 import {
-  getQuotaStatus,
-  roundQuotaPercentage,
-  type AccountSortKey,
-  type QuotaStatus,
-} from '@/modules/cloud-account/utils/quota-display';
-import {
-  getManualAccountRecommendation,
-  prioritizeRecommendedAccount,
-  type ManualAccountRecommendation,
+  getManualAccountRecommendations,
+  type ManualAccountRecommendations,
 } from '@/modules/cloud-account/utils/manual-account-recommendation';
-import { selectWeeklyQuotaItems } from '@/modules/cloud-account/utils/quota-groups';
 
 const EMPTY_ACCOUNTS: CloudAccountView[] = [];
 const EMPTY_SELECTED_TIER_KEYS: string[] = [];
@@ -27,65 +19,12 @@ const EMPTY_MODEL_VISIBILITY: Record<string, boolean> = {};
 
 export interface CloudAccountListView {
   sortedAccounts: CloudAccountView[];
-  manualRecommendation: ManualAccountRecommendation | null;
+  recommendationsByAccount: ManualAccountRecommendations;
   tierOptions: AccountTierOption[];
   effectiveSelectedTierKeys: string[];
   effectiveSelectedTierKeySet: Set<string>;
   hasActiveTierFilter: boolean;
   visibleAccountIds: string[];
-  totalAccounts: number;
-  activeAccounts: number;
-  rateLimitedAccounts: number;
-  overallQuotaPercentage: number | null;
-  effectiveQuotaStatus: QuotaStatus;
-  overallWeeklyQuotaPercentage: number | null;
-  effectiveWeeklyQuotaStatus: QuotaStatus;
-}
-
-function calculateOverallQuotaPercentage(
-  accounts: CloudAccountView[],
-  modelVisibility: Record<string, boolean>,
-): number | null {
-  if (accounts.length === 0) {
-    return null;
-  }
-
-  const visibleModelInfos = flatMap(accounts, (account) => {
-    if (!account.quota?.models) {
-      return [];
-    }
-
-    return Object.entries(account.quota.models)
-      .filter(([modelName]) => modelVisibility[modelName] !== false)
-      .map(([, info]) => info);
-  });
-
-  if (isEmpty(visibleModelInfos)) {
-    return null;
-  }
-
-  const averagePercentage =
-    sumBy(visibleModelInfos, (modelInfo) => modelInfo.percentage) / visibleModelInfos.length;
-
-  return roundQuotaPercentage(averagePercentage);
-}
-
-function calculateOverallWeeklyQuotaPercentage(accounts: CloudAccountView[]): number | null {
-  if (accounts.length === 0) {
-    return null;
-  }
-
-  const weeklyItems = flatMap(accounts, (account) =>
-    selectWeeklyQuotaItems(account.quota?.quota_groups),
-  );
-
-  if (isEmpty(weeklyItems)) {
-    return null;
-  }
-
-  const averagePercentage = sumBy(weeklyItems, (item) => item.percentage) / weeklyItems.length;
-
-  return roundQuotaPercentage(averagePercentage);
 }
 
 export function useCloudAccountListView(
@@ -107,7 +46,7 @@ export function useCloudAccountListView(
     [effectiveSelectedTierKeys],
   );
 
-  const baseSortedAccounts = useMemo(() => {
+  const sortedAccounts = useMemo(() => {
     return filterAndSortCloudAccounts(sourceAccounts, {
       selectedTierKeys: effectiveSelectedTierKeys,
       sortKey: currentSort,
@@ -116,18 +55,9 @@ export function useCloudAccountListView(
     });
   }, [currentSort, effectiveSelectedTierKeys, modelVisibility, sourceAccounts, tierOptions]);
 
-  const manualRecommendation = useMemo(
-    () =>
-      getManualAccountRecommendation(baseSortedAccounts, {
-        sortKey: currentSort,
-        modelVisibility,
-      }),
-    [baseSortedAccounts, currentSort, modelVisibility],
-  );
-
-  const sortedAccounts = useMemo(
-    () => prioritizeRecommendedAccount(baseSortedAccounts, manualRecommendation),
-    [baseSortedAccounts, manualRecommendation],
+  const recommendationsByAccount = useMemo(
+    () => getManualAccountRecommendations(sourceAccounts),
+    [sourceAccounts],
   );
 
   const visibleAccountIds = useMemo(
@@ -135,37 +65,13 @@ export function useCloudAccountListView(
     [sortedAccounts],
   );
 
-  const overallQuotaPercentage = useMemo(
-    () => calculateOverallQuotaPercentage(sortedAccounts, modelVisibility),
-    [modelVisibility, sortedAccounts],
-  );
-
-  const overallQuotaStatus =
-    overallQuotaPercentage === null ? null : getQuotaStatus(overallQuotaPercentage);
-
-  const overallWeeklyQuotaPercentage = useMemo(
-    () => calculateOverallWeeklyQuotaPercentage(sortedAccounts),
-    [sortedAccounts],
-  );
-
-  const overallWeeklyQuotaStatus =
-    overallWeeklyQuotaPercentage === null ? null : getQuotaStatus(overallWeeklyQuotaPercentage);
-
   return {
     sortedAccounts,
-    manualRecommendation,
+    recommendationsByAccount,
     tierOptions,
     effectiveSelectedTierKeys,
     effectiveSelectedTierKeySet,
     hasActiveTierFilter: effectiveSelectedTierKeys.length > 0,
     visibleAccountIds,
-    totalAccounts: size(sortedAccounts),
-    activeAccounts: filter(sortedAccounts, (account) => account.is_active).length,
-    rateLimitedAccounts: filter(sortedAccounts, (account) => account.status === 'rate_limited')
-      .length,
-    overallQuotaPercentage,
-    effectiveQuotaStatus: overallQuotaStatus ?? 'low',
-    overallWeeklyQuotaPercentage,
-    effectiveWeeklyQuotaStatus: overallWeeklyQuotaStatus ?? 'low',
   };
 }

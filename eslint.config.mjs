@@ -9,6 +9,7 @@ import path from 'node:path';
 import { includeIgnoreFile } from '@eslint/compat';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'eslint/config';
+import { noHandwrittenSql } from './scripts/quality/no-handwritten-sql.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,6 +34,11 @@ export default defineConfig([
   eslintPluginPrettierRecommended,
   ...tseslint.configs.recommended,
   {
+    // Historical diagnostic preloads use Node's CommonJS loading contract.
+    files: ['artifacts/**/*.cjs'],
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
+  },
+  {
     plugins: {
       'unused-imports': unusedImports,
     },
@@ -54,6 +60,27 @@ export default defineConfig([
       ],
       'no-empty-pattern': 'off',
       'prefer-const': 'off',
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            'UnaryExpression[operator="void"][argument.type="CallExpression"], ' +
+            'UnaryExpression[operator="void"][argument.type="ChainExpression"][argument.expression.type="CallExpression"]',
+          message:
+            'Use a call statement or a block-bodied callback instead of prefixing a call with void.',
+        },
+      ],
     },
+  },
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/tests/**', '**/*.{test,spec}.{ts,tsx}', '**/*.gen.ts'],
+    rules: { '@typescript-eslint/no-explicit-any': 'error' },
+  },
+  {
+    files: ['{src,scripts,tests}/**/*.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
+    ignores: ['**/*.gen.ts'],
+    plugins: { agm: { rules: { 'no-handwritten-sql': noHandwrittenSql } } },
+    rules: { 'agm/no-handwritten-sql': 'error' },
   },
 ]);

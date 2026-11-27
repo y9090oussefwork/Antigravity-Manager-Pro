@@ -10,6 +10,8 @@ export const WorkspaceProfileSchema = z.object({
     .min(1, 'Workspace name is required')
     .max(100, 'Name cannot exceed 100 characters'),
   accountId: z.string().trim().min(1, 'Bound Google Account ID is required'),
+  accountIds: z.array(z.string().trim().min(1)).optional(),
+  autoSwitchEnabled: z.boolean().optional(),
   projectPath: z.string().trim().min(1, 'Project directory path is required'),
   userDataDir: z.string().trim().min(1, 'User data directory path is required'),
   createdAt: z.number().int().positive(),
@@ -25,6 +27,8 @@ export const CreateWorkspaceProfileInputSchema = z.object({
     .min(1, 'Workspace name is required')
     .max(100, 'Name cannot exceed 100 characters'),
   accountId: z.string().trim().min(1, 'Bound Google Account ID is required'),
+  accountIds: z.array(z.string().trim().min(1)).min(1).optional(),
+  autoSwitchEnabled: z.boolean().optional(),
   projectPath: z.string().trim().min(1, 'Project directory path is required'),
 });
 export type CreateWorkspaceProfileInput = z.infer<typeof CreateWorkspaceProfileInputSchema>;
@@ -39,6 +43,8 @@ export const UpdateWorkspaceProfileInputSchema = z.object({
     .max(100, 'Name cannot exceed 100 characters')
     .optional(),
   accountId: z.string().trim().min(1, 'Bound Google Account ID cannot be empty').optional(),
+  accountIds: z.array(z.string().trim().min(1)).min(1).optional(),
+  autoSwitchEnabled: z.boolean().optional(),
   projectPath: z.string().trim().min(1, 'Project directory path cannot be empty').optional(),
 });
 export type UpdateWorkspaceProfileInput = z.infer<typeof UpdateWorkspaceProfileInputSchema>;
@@ -112,6 +118,7 @@ export type WorkspaceProfileStatus = z.infer<typeof WorkspaceProfileStatusSchema
 export const WorkspaceProfileViewSchema = WorkspaceProfileSchema.extend({
   status: WorkspaceProfileStatusSchema,
   account: CloudAccountViewSchema.optional(),
+  accounts: z.array(CloudAccountViewSchema).optional(),
 });
 export type WorkspaceProfileView = z.infer<typeof WorkspaceProfileViewSchema>;
 

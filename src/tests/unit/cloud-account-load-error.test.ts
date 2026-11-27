@@ -58,7 +58,7 @@ describe('CloudAccountLoadError', () => {
     renderError();
     fireEvent.click(screen.getByRole('button', { name: 'cloud.error.dataRepair.openRepository' }));
     expect(openExternalUrl.mock.calls).toEqual([
-      ['https://github.com/Draculabo/AntigravityManager'],
+      ['https://github.com/y9090oussefwork/Antigravity-Manager-Pro'],
     ]);
   });
 

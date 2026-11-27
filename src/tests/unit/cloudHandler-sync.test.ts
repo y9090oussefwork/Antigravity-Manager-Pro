@@ -113,6 +113,7 @@ vi.mock('@/modules/cloud-account/services/GoogleAPIService', async (importOrigin
 });
 
 vi.mock('@/modules/antigravity-runtime/credentials/antigravityCredentialStore', () => ({
+  readAgyAccountToken: vi.fn(async () => null),
   readAntigravityCredentialStoreToken: vi.fn(() => null),
   writeAntigravityCredentialStoreToken: vi.fn(),
 }));
@@ -447,6 +448,7 @@ describe('IdeAccountImportAdapter.syncFromIde', () => {
         }),
         proxy_url: 'http://127.0.0.1:7890',
       }),
+      expect.any(Array),
     );
   });
 
@@ -510,6 +512,7 @@ describe('IdeAccountImportAdapter.syncFromIde', () => {
           project_id: 'enterprise-project-recovered',
         }),
       }),
+      expect.any(Array),
     );
   });
 
@@ -564,6 +567,7 @@ describe('IdeAccountImportAdapter.syncFromIde', () => {
         status: 'active',
         status_reason: undefined,
       }),
+      expect.any(Array),
     );
   });
 
@@ -664,6 +668,7 @@ describe('IdeAccountImportAdapter.syncFromIde', () => {
           id_token: 'refreshed-id-token',
         }),
       }),
+      expect.any(Array),
     );
   });
 
@@ -770,6 +775,7 @@ describe('IdeAccountImportAdapter.syncFromIde', () => {
         health: existingAccount.health,
         last_used: existingAccount.last_used,
       }),
+      expect.any(Array),
     );
   });
 
@@ -846,8 +852,9 @@ describe('IdeAccountImportAdapter.syncFromIde', () => {
         status: 'active',
         status_reason: undefined,
       }),
+      expect.any(Array),
     );
-    expect(clearFailureStateSpy).toHaveBeenCalledWith('existing-id');
+    expect(clearFailureStateSpy).toHaveBeenCalledWith('existing-id', expect.any(Function));
   });
 
   it('keeps a durable OAuth block when an unchanged exported refresh grant is reimported', async () => {
@@ -900,6 +907,7 @@ describe('IdeAccountImportAdapter.syncFromIde', () => {
         status: 'expired',
         status_reason: existingAccount.status_reason,
       }),
+      expect.any(Array),
     );
     expect(clearFailureStateSpy).not.toHaveBeenCalled();
   });
@@ -982,6 +990,7 @@ describe('IdeAccountImportAdapter.syncFromIde', () => {
       'blocked-id',
       'expired',
       CLOUD_ACCOUNT_REAUTH_REQUIRED_REASON,
+      expect.any(Function),
     );
     expect(formatSwitchRefreshError(refreshError)).toContain('re-login');
   });
@@ -1130,7 +1139,7 @@ describe('cloud switch fail-fast path', () => {
     }));
 
     vi.doMock('@/modules/app-shell/ipc/tray/handler', () => ({
-      updateTrayMenu: vi.fn(),
+      refreshTrayAccount: vi.fn(),
     }));
 
     vi.doMock('../../shared/platform/paths', () => ({
@@ -1141,6 +1150,7 @@ describe('cloud switch fail-fast path', () => {
 
     vi.doMock('../../shared/logging/logger', () => ({
       logger: {
+        shareable: vi.fn(),
         info: vi.fn(),
         warn: vi.fn(),
         error: vi.fn(),
@@ -1179,6 +1189,8 @@ describe('cloud switch fail-fast path', () => {
         access_token: 'refreshed-access',
         expiry_timestamp: expect.any(Number),
       }),
+      expect.any(Function),
+      true,
     );
     expect(applyDeviceProfileMock).toHaveBeenCalledTimes(1);
     expect(applyDeviceProfileMock).toHaveBeenCalledWith(account.device_profile, undefined, {
@@ -1281,7 +1293,7 @@ describe('cloud oauth client key backfill', () => {
         debug: vi.fn(),
       },
     }));
-    vi.doMock('@/modules/app-shell/ipc/tray/handler', () => ({ updateTrayMenu: vi.fn() }));
+    vi.doMock('@/modules/app-shell/ipc/tray/handler', () => ({ refreshTrayAccount: vi.fn() }));
     vi.doMock('@/modules/identity-profile/ipc/handler', () => ({
       ensureGlobalOriginalFromCurrentStorage: vi.fn(),
       ensureIdentityProfileStorage: vi.fn(),
@@ -1403,7 +1415,7 @@ describe('cloud oauth client key backfill', () => {
         debug: vi.fn(),
       },
     }));
-    vi.doMock('@/modules/app-shell/ipc/tray/handler', () => ({ updateTrayMenu: vi.fn() }));
+    vi.doMock('@/modules/app-shell/ipc/tray/handler', () => ({ refreshTrayAccount: vi.fn() }));
     vi.doMock('@/modules/identity-profile/ipc/handler', () => ({
       ensureGlobalOriginalFromCurrentStorage: vi.fn(),
       ensureIdentityProfileStorage: vi.fn(),
@@ -1504,7 +1516,7 @@ describe('cloud oauth client key backfill', () => {
         debug: vi.fn(),
       },
     }));
-    vi.doMock('@/modules/app-shell/ipc/tray/handler', () => ({ updateTrayMenu: vi.fn() }));
+    vi.doMock('@/modules/app-shell/ipc/tray/handler', () => ({ refreshTrayAccount: vi.fn() }));
     vi.doMock('@/modules/identity-profile/ipc/handler', () => ({
       ensureGlobalOriginalFromCurrentStorage: vi.fn(),
       ensureIdentityProfileStorage: vi.fn(),
@@ -1537,6 +1549,7 @@ describe('cloud oauth client key backfill', () => {
       expect.objectContaining({
         oauth_client_key: 'custom_a',
       }),
+      expect.any(Function),
     );
     expect(setSettingMock).toHaveBeenCalledWith('oauth_client_key_backfill_v1_done', true);
   });
@@ -1608,7 +1621,7 @@ describe('cloud oauth client key backfill', () => {
         debug: vi.fn(),
       },
     }));
-    vi.doMock('@/modules/app-shell/ipc/tray/handler', () => ({ updateTrayMenu: vi.fn() }));
+    vi.doMock('@/modules/app-shell/ipc/tray/handler', () => ({ refreshTrayAccount: vi.fn() }));
     vi.doMock('@/modules/identity-profile/ipc/handler', () => ({
       ensureGlobalOriginalFromCurrentStorage: vi.fn(),
       ensureIdentityProfileStorage: vi.fn(),

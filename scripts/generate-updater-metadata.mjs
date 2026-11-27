@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util';
 import semver from 'semver';
 import { z } from 'zod';
 
-const repositoryUrl = 'https://github.com/Draculabo/AntigravityManager';
+const repositoryUrl = 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro';
 const releaseSchema = z.object({
   tagName: z
     .string()
@@ -20,9 +20,9 @@ const releaseSchema = z.object({
 });
 
 /** Serialize the published description as JSON rather than interpolating Markdown into shell code. */
-export function buildUpdaterMetadata(release) {
+export function buildUpdaterMetadata(release, baseUrl = repositoryUrl) {
   const parsed = releaseSchema.parse(release);
-  const releaseUrl = `${repositoryUrl}/releases/tag/${parsed.tagName}`;
+  const releaseUrl = `${baseUrl}/releases/tag/${parsed.tagName}`;
   if (parsed.url !== releaseUrl) {
     throw new Error('Release URL does not match the selected repository and tag');
   }

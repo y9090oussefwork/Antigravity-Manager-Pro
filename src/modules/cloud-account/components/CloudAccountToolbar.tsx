@@ -27,7 +27,7 @@ import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { AccountTierFilterDropdown } from '@/modules/cloud-account/components/AccountTierFilterDropdown';
 import { CloudAccountLoginDialog } from './CloudAccountLoginDialog';
-import { CloudAccountFileDialogs } from './CloudAccountFileDialogs';
+import { CloudAccountTransferMenu } from './CloudAccountTransferMenu';
 import { CloudAccountSelectAllButton } from './CloudAccountSelectAllButton';
 import {
   CLOUD_ACCOUNT_SORT_I18N_KEYS,
@@ -36,10 +36,10 @@ import {
 } from '@/modules/cloud-account/components/CloudAccountList.constants';
 import type { AccountTierOption } from '@/modules/cloud-account/utils/account-tier-filter';
 import type { AccountSortKey } from '@/modules/cloud-account/utils/quota-display';
-import { LocalAccountImportDialog } from '@/modules/cloud-account/local-import/components/LocalAccountImportDialog';
 import type { QuotaWindow } from '@/modules/cloud-account/utils/quota-groups';
 import type { QuotaGroupVisibility } from '@/modules/cloud-account/utils/quota-group-visibility';
 import { QuotaGroupVisibilityMenu } from './QuotaGroupVisibilityMenu';
+import type { AccountModelCategory } from '@/modules/cloud-account/utils/account-model-category';
 
 interface CloudAccountToolbarProps {
   visibleAccountIds: string[];
@@ -57,6 +57,8 @@ interface CloudAccountToolbarProps {
   quotaGroupVisibility: QuotaGroupVisibility;
   isMinimalMode: boolean;
   compactQuotaSummary?: boolean;
+  modelCategory?: AccountModelCategory;
+  categoryCounts?: Record<AccountModelCategory, number>;
   searchQuery?: string;
   getTierOptionLabel: (key: string, label: string) => string;
   onToggleAutoSwitch: (checked: boolean) => void;
@@ -69,6 +71,7 @@ interface CloudAccountToolbarProps {
   onQuotaGroupVisibilityChange: (value: QuotaGroupVisibility) => void;
   onToggleMinimalMode: (enabled: boolean) => void;
   onToggleCompactQuotaSummary?: (enabled: boolean) => void;
+  onModelCategoryChange?: (category: AccountModelCategory) => void;
   onSearchQueryChange?: (value: string) => void;
 }
 
@@ -88,6 +91,8 @@ export function CloudAccountToolbar({
   quotaGroupVisibility,
   isMinimalMode,
   compactQuotaSummary = false,
+  modelCategory = 'all',
+  categoryCounts,
   searchQuery = '',
   getTierOptionLabel,
   onToggleAutoSwitch,
@@ -100,9 +105,31 @@ export function CloudAccountToolbar({
   onQuotaGroupVisibilityChange,
   onToggleMinimalMode,
   onToggleCompactQuotaSummary,
+  onModelCategoryChange,
   onSearchQueryChange,
 }: CloudAccountToolbarProps) {
   const { t } = useTranslation();
+
+  const categoryTabs: Array<{ id: AccountModelCategory; label: string; count: number }> = [
+    { id: 'all', label: t('cloud.model-category.all'), count: categoryCounts?.all ?? 0 },
+    {
+      id: 'gemini-pro',
+      label: t('cloud.model-category.gemini-pro'),
+      count: categoryCounts?.['gemini-pro'] ?? 0,
+    },
+    {
+      id: 'gemini-pro-go',
+      label: t('cloud.model-category.gemini-pro-go'),
+      count: categoryCounts?.['gemini-pro-go'] ?? 0,
+    },
+  ];
+  if ((categoryCounts?.other ?? 0) > 0 || modelCategory === 'other') {
+    categoryTabs.push({
+      id: 'other',
+      label: t('cloud.model-category.other'),
+      count: categoryCounts?.other ?? 0,
+    });
+  }
 
   return (
     <div data-slot="cloud-account-toolbar" className="bg-card rounded-lg border">
@@ -142,9 +169,7 @@ export function CloudAccountToolbar({
           </Button>
 
           <div className="ml-auto flex flex-wrap items-center gap-2 [@media(max-width:760px)]:ml-0 [@media(max-width:760px)]:w-full">
-            <LocalAccountImportDialog />
-
-            <CloudAccountFileDialogs />
+            <CloudAccountTransferMenu />
             <CloudAccountLoginDialog />
           </div>
         </div>
@@ -373,6 +398,42 @@ export function CloudAccountToolbar({
           </TooltipProvider>
         </div>
       </div>
+
+      {onModelCategoryChange && (
+        <div
+          className="flex flex-wrap items-center gap-1.5 border-t px-4 py-2.5"
+          role="group"
+          aria-label={t('cloud.model-category.label')}
+        >
+          {categoryTabs.map((tab) => {
+            const active = modelCategory === tab.id;
+            return (
+              <Button
+                key={tab.id}
+                type="button"
+                variant={active ? 'secondary' : 'ghost'}
+                size="xs"
+                aria-pressed={active}
+                onClick={() => onModelCategoryChange(tab.id)}
+                className="h-7 cursor-default gap-1.5 px-2.5 text-xs font-medium"
+              >
+                <span>{tab.label}</span>
+                {categoryCounts && (
+                  <span
+                    className={`rounded-full px-1.5 py-0.2 text-[10px] tabular-nums ${
+                      active
+                        ? 'bg-background text-foreground'
+                        : 'bg-muted text-muted-foreground'
+                    }`}
+                  >
+                    {tab.count}
+                  </span>
+                )}
+              </Button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

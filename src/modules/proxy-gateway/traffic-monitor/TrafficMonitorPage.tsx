@@ -1,10 +1,13 @@
 import { TrafficMonitorHeader } from './components/TrafficMonitorHeader';
 import { TrafficSearchForm } from './components/TrafficSearchForm';
 import { TrafficRefreshControls } from './components/TrafficRefreshControls';
+import { TrafficRequestActivity } from './components/TrafficRequestActivity';
+import { TrafficRequestCsvAction } from './components/TrafficRequestCsvAction';
+import { AuditClientSchema } from '../audit/audit-client-identity';
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { FeedbackState } from '@/components/ui/feedback-state';
@@ -24,6 +27,8 @@ import type { TrafficClass } from '@/modules/proxy-gateway/audit/traffic-classif
 import type { TrafficAuditListInput } from '@/modules/proxy-gateway/audit/traffic-audit.types';
 
 import { TrafficTable } from './components/TrafficTable';
+import { TrafficClearControls } from './components/TrafficClearControls';
+import { TrafficSessionFilter } from './components/TrafficSessionFilter';
 import { TrafficDetailDialog } from './TrafficDetailDialog';
 import { dateBoundary, toLocalDate } from './traffic-date-range';
 
@@ -56,8 +61,13 @@ function AccountOption({
   );
 }
 
-interface TrafficFilters {
+export interface TrafficFilters {
+  sessionId?: string;
   accountId?: string;
+  attemptAccountId?: string;
+  attemptModel?: string;
+  client?: TrafficAuditListInput['client'];
+  protocol?: string;
   from?: number;
   modelFamily?: string;
   modality?: Modality;
@@ -67,11 +77,19 @@ interface TrafficFilters {
   statusMode?: StatusMode;
   tab: MonitorTab;
   to?: number;
+  usageAsOf?: number;
+  usageState?: TrafficAuditListInput['usageState'];
 }
 
 interface TrafficMonitorPageProps {
+  showHeader?: boolean;
+  initialSessionId?: string;
   initialPage?: number;
   initialAccountId?: string;
+  initialAttemptAccountId?: string;
+  initialAttemptModel?: string;
+  initialClient?: TrafficAuditListInput['client'];
+  initialProtocol?: string;
   initialModelFamily?: string;
   initialModality?: Modality;
   initialStatus?: number;
@@ -80,11 +98,19 @@ interface TrafficMonitorPageProps {
   initialTab?: MonitorTab;
   initialFrom?: number;
   initialTo?: number;
+  initialUsageAsOf?: number;
+  initialUsageState?: TrafficAuditListInput['usageState'];
   onFiltersChange?: (filters: TrafficFilters) => void;
 }
 
 export function TrafficMonitorPage({
+  showHeader = true,
+  initialSessionId: sessionId,
   initialAccountId: accountId,
+  initialAttemptAccountId: attemptAccountId,
+  initialAttemptModel: attemptModel,
+  initialClient: client,
+  initialProtocol: protocol,
   initialModelFamily: modelFamily,
   initialModality: modality,
   initialPage: page = 0,
@@ -94,14 +120,14 @@ export function TrafficMonitorPage({
   initialStatusMode: statusMode,
   initialFrom: from,
   initialTo: to,
+  initialUsageAsOf: usageAsOf,
+  initialUsageState: usageState,
   onFiltersChange,
 }: TrafficMonitorPageProps) {
   const { t } = useTranslation();
-  const queryClient = useQueryClient();
   const { data: cloudAccounts = [] } = useCloudAccounts();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [refreshControlsKey, setRefreshControlsKey] = useState(0);
-  const [confirmClear, setConfirmClear] = useState(false);
   const [includeCredentials, setIncludeCredentials] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState('');
 
@@ -120,7 +146,12 @@ export function TrafficMonitorPage({
 
   const updateFilters = (next: Partial<TrafficFilters>) => {
     const filters = {
+      sessionId,
       accountId,
+      attemptAccountId,
+      attemptModel,
+      client,
+      protocol,
       from,
       modelFamily,
       modality,
@@ -130,11 +161,36 @@ export function TrafficMonitorPage({
       statusMode,
       tab,
       to,
+      usageAsOf,
+      usageState,
       ...next,
     };
     onFiltersChange?.(filters);
   };
 
+  const requestFilters = {
+    search: search || undefined,
+    sessionId,
+    accountId: tab === 'model' ? accountId : undefined,
+    ...(tab === 'model' && attemptAccountId && { attemptAccountId }),
+    ...(tab === 'model' && attemptModel && { attemptModel }),
+    ...(tab === 'model' && usageAsOf !== undefined && { usageAsOf }),
+    ...(tab === 'model' && usageState && { usageState }),
+    ...(tab === 'model' && client && { client }),
+    ...(tab === 'model' && protocol && { protocol }),
+    modelFamily: tab === 'model' ? modelFamily : undefined,
+    modality: tab === 'model' ? modality : undefined,
+    statusMode,
+    status,
+    from,
+    to,
+  };
+  const listInput: TrafficAuditListInput = {
+    ...requestFilters,
+    limit: PAGE_SIZE,
+    offset: page * PAGE_SIZE,
+    trafficClass: tab,
+  };
   const list = useQuery({
     queryKey: [
       'gateway',
@@ -145,25 +201,19 @@ export function TrafficMonitorPage({
       from,
       to,
       accountId,
+      attemptAccountId,
+      attemptModel,
+      client,
+      protocol,
+      usageAsOf,
+      usageState,
       modelFamily,
       modality,
       statusMode,
       status,
+      sessionId,
     ],
-    queryFn: () =>
-      ipc.client.gateway.auditList({
-        limit: PAGE_SIZE,
-        offset: page * PAGE_SIZE,
-        search: search || undefined,
-        accountId: tab === 'model' ? accountId : undefined,
-        modelFamily: tab === 'model' ? modelFamily : undefined,
-        modality: tab === 'model' ? modality : undefined,
-        statusMode,
-        status,
-        trafficClass: tab,
-        from,
-        to,
-      }),
+    queryFn: () => ipc.client.gateway.auditList(listInput),
     refetchInterval: page === 0 && !selectedId ? 5_000 : false,
   });
   const filterOptions = useQuery({
@@ -173,23 +223,12 @@ export function TrafficMonitorPage({
     refetchInterval: 30_000,
   });
 
-  const clearCurrent = async () => {
-    if (!confirmClear) {
-      setConfirmClear(true);
-      return;
-    }
-    await ipc.client.gateway.auditClear({ trafficClass: tab });
-    setConfirmClear(false);
-    updateFilters({ page: 0 });
-    await queryClient.invalidateQueries({ queryKey: ['gateway'] });
-  };
-
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <TrafficMonitorHeader />
+      {showHeader && <TrafficMonitorHeader />}
 
-      <div className="flex flex-wrap items-center gap-2 border-b px-6 py-3">
-        <div className="bg-muted flex rounded-lg p-1">
+      <div className="flex flex-wrap items-center gap-2 px-4 pt-1 pb-2 lg:px-6">
+        <div className="bg-foreground/[0.045] flex max-w-full flex-wrap rounded-xl p-1">
           {(
             [
               ['model', t('traffic.model')],
@@ -202,11 +241,10 @@ export function TrafficMonitorPage({
               key={value}
               type="button"
               aria-pressed={tab === value}
-              className={`focus-visible:ring-ring cursor-default rounded-md px-3 py-1.5 text-xs font-medium outline-none focus-visible:ring-2 ${tab === value ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground'}`}
+              className={`focus-visible:ring-ring cursor-default rounded-lg px-3 py-1.5 text-xs font-medium outline-none focus-visible:ring-2 ${tab === value ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
               onClick={() => {
                 updateFilters({ page: 0, tab: value });
                 setRefreshControlsKey((key) => key + 1);
-                setConfirmClear(false);
               }}
             >
               {label}
@@ -227,7 +265,11 @@ export function TrafficMonitorPage({
               value={toLocalDate(from)}
               max={toLocalDate(to)}
               onChange={(event) =>
-                updateFilters({ page: 0, from: dateBoundary(event.target.value, false) })
+                updateFilters({
+                  page: 0,
+                  from: dateBoundary(event.target.value, false),
+                  usageAsOf: undefined,
+                })
               }
             />
           </label>
@@ -239,37 +281,118 @@ export function TrafficMonitorPage({
               value={toLocalDate(to)}
               min={toLocalDate(from)}
               onChange={(event) =>
-                updateFilters({ page: 0, to: dateBoundary(event.target.value, true) })
+                updateFilters({
+                  page: 0,
+                  to: dateBoundary(event.target.value, true),
+                  usageAsOf: undefined,
+                })
               }
             />
           </label>
         </div>
-        {tab !== 'ipc' && (
-          <label
-            className="flex items-center gap-2 text-xs"
-            title={t('traffic.credential-warning')}
-          >
-            <input
-              type="checkbox"
-              checked={includeCredentials}
-              onChange={(event) => setIncludeCredentials(event.target.checked)}
-            />
-            {t('traffic.include-current-credential')}
-          </label>
-        )}
         <TrafficRefreshControls
           key={`${tab}:${refreshControlsKey}`}
           tab={tab}
           page={page}
           selectedId={selectedId}
         />
-        <Button size="sm" variant={confirmClear ? 'destructive' : 'outline'} onClick={clearCurrent}>
-          <Trash2 className="h-4 w-4" />
-          {confirmClear ? t('traffic.confirm-clear') : t('traffic.clear-category')}
-        </Button>
+        <details className="group relative">
+          <summary className="hover:bg-card focus-visible:outline-ring text-muted-foreground flex h-9 list-none items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium">
+            {t('traffic.usage-request-actions')}{' '}
+            <ChevronDown className="size-3 group-open:rotate-180" aria-hidden="true" />
+          </summary>
+          <div className="bg-popover relative z-20 mt-1 flex flex-wrap items-center gap-3 rounded-xl border p-3 lg:absolute lg:end-0 lg:w-80">
+            {tab !== 'ipc' && (
+              <label
+                className="flex items-center gap-2 text-xs"
+                title={t('traffic.credential-warning')}
+              >
+                <input
+                  type="checkbox"
+                  checked={includeCredentials}
+                  onChange={(event) => setIncludeCredentials(event.target.checked)}
+                />
+                {t('traffic.include-current-credential')}
+              </label>
+            )}
+            <TrafficClearControls tab={tab} />
+          </div>
+        </details>
+        {tab === 'model' && <TrafficRequestActivity filters={requestFilters} />}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-b px-6 py-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2 px-4 py-2 text-xs lg:px-6">
+        {tab === 'model' && (
+          <label className="text-muted-foreground flex items-center gap-1.5">
+            {t('traffic.usage-client')}
+            <select
+              className="bg-background text-foreground h-8 rounded-md border px-2"
+              value={client ?? ''}
+              onChange={(event) => {
+                const selection = AuditClientSchema.safeParse(event.target.value);
+                updateFilters({ page: 0, client: selection.data });
+              }}
+            >
+              <option value="">{t('traffic.usage-all-clients')}</option>
+              {AuditClientSchema.options.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {tab === 'model' && protocol && (
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={() => updateFilters({ page: 0, protocol: undefined })}
+          >
+            {t('traffic.usage-protocol-filter', { value: protocol })}
+            <X aria-hidden="true" />
+          </Button>
+        )}
+        {tab === 'model' && (usageState === 'retried' || usageState === 'failed') && (
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={() => updateFilters({ page: 0, usageState: 'all' })}
+          >
+            {t(`traffic.usage-only-${usageState}`)}
+            <X aria-hidden="true" />
+          </Button>
+        )}
+        {tab === 'model' && attemptAccountId && (
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={() => updateFilters({ page: 0, attemptAccountId: undefined })}
+          >
+            {t('traffic.usage-attempt-account-filter', {
+              account:
+                cloudAccounts.find((account) => account.id === attemptAccountId)?.email ??
+                attemptAccountId,
+            })}
+            <X aria-hidden="true" />
+          </Button>
+        )}
+        {tab === 'model' && attemptModel && (
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={() => updateFilters({ page: 0, attemptModel: undefined })}
+          >
+            {t('traffic.usage-attempt-model-filter', { model: attemptModel })}
+            <X aria-hidden="true" />
+          </Button>
+        )}
+        <TrafficSessionFilter
+          key={sessionId ?? ''}
+          sessionId={sessionId}
+          from={from}
+          to={usageAsOf === undefined ? to : Math.min(to ?? usageAsOf, usageAsOf)}
+          onApply={(value) => updateFilters({ page: 0, sessionId: value })}
+        />
         {tab === 'model' && (
           <>
             <div className="text-muted-foreground flex items-center gap-1.5">
@@ -427,7 +550,9 @@ export function TrafficMonitorPage({
             variant="outline"
             size="sm"
             disabled={list.isFetching}
-            onClick={() => void list.refetch()}
+            onClick={() => {
+              list.refetch();
+            }}
           >
             {t('action.retry')}
           </Button>
@@ -440,7 +565,13 @@ export function TrafficMonitorPage({
           description={t('traffic.load-failed-description')}
           className="min-h-0 flex-1"
         >
-          <Button variant="outline" disabled={list.isFetching} onClick={() => void list.refetch()}>
+          <Button
+            variant="outline"
+            disabled={list.isFetching}
+            onClick={() => {
+              list.refetch();
+            }}
+          >
             {t('action.retry')}
           </Button>
         </FeedbackState>
@@ -450,11 +581,16 @@ export function TrafficMonitorPage({
           loading={list.isLoading}
           tab={tab}
           onOpen={setSelectedId}
-          onCopyCurl={(id) => void copyCurl(id)}
+          onCopyCurl={(id) => {
+            copyCurl(id);
+          }}
         />
       )}
 
-      <footer className="flex items-center justify-between border-t px-6 py-2">
+      <footer className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 px-4 py-2 lg:px-6">
+        {tab !== 'system' && (
+          <TrafficRequestCsvAction input={listInput} disabled={!list.data?.total} />
+        )}
         <span className="text-muted-foreground text-xs">
           {t('traffic.total', { count: list.data?.total ?? 0, page: page + 1 })}
         </span>
@@ -462,6 +598,7 @@ export function TrafficMonitorPage({
           <Button
             size="icon"
             variant="ghost"
+            aria-label={t('traffic.usage-previous-page')}
             disabled={page === 0}
             onClick={() => updateFilters({ page: Math.max(0, page - 1) })}
           >
@@ -470,6 +607,7 @@ export function TrafficMonitorPage({
           <Button
             size="icon"
             variant="ghost"
+            aria-label={t('traffic.usage-next-page')}
             disabled={(page + 1) * PAGE_SIZE >= (list.data?.total ?? 0)}
             onClick={() => updateFilters({ page: page + 1 })}
           >
@@ -481,7 +619,9 @@ export function TrafficMonitorPage({
       <TrafficDetailDialog
         id={selectedId}
         onOpenChange={(open) => !open && setSelectedId(null)}
-        onCopyCurl={(id, attemptId) => void copyCurl(id, attemptId)}
+        onCopyCurl={(id, attemptId) => {
+          copyCurl(id, attemptId);
+        }}
         includeCredentials={includeCredentials}
       />
     </div>

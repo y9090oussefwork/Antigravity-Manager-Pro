@@ -33,6 +33,8 @@ function mockAdapter(): CloudAccountAdapter {
     setWeeklyWarmupConfig: vi.fn(),
     importFile: vi.fn(),
     exportFile: vi.fn(),
+    importCredential: vi.fn(),
+    getOAuthSession: vi.fn(),
     startLogin: vi.fn(),
     submitLoginCode: vi.fn(),
     stopLogin: vi.fn(),
@@ -44,6 +46,9 @@ function mockAdapter(): CloudAccountAdapter {
     getSecurityStatus: vi.fn(),
     openValidationLink: vi.fn(),
     setProxy: vi.fn(),
+    getAccountProjectId: vi.fn(),
+    setAccountProjectId: vi.fn(),
+    fetchAccountProjectId: vi.fn(),
     delete: vi.fn(),
     listOAuthClients: vi.fn(),
     getActiveOAuthClient: vi.fn(),
@@ -61,6 +66,29 @@ function mockAdapter(): CloudAccountAdapter {
 }
 
 describe('cloud account renderer IPC', () => {
+  it('keeps the Project ID result strict and validates edits before calling the owner', async () => {
+    const adapter = mockAdapter();
+    const accountId = '11111111-1111-4111-8111-111111111111';
+    const client = createRouterClient(cloudRouter);
+    vi.mocked(adapter.getAccountProjectId).mockResolvedValueOnce({ projectId: 'current-project' });
+    vi.mocked(adapter.setAccountProjectId).mockResolvedValueOnce({ projectId: 'new-project' });
+    await expect(client.getAccountProjectId({ accountId })).resolves.toEqual({
+      projectId: 'current-project',
+    });
+    const input = { accountId, expectedProjectId: 'current-project' };
+    await expect(
+      client.setAccountProjectId({ ...input, projectId: ' new-project ' }),
+    ).resolves.toEqual({ projectId: 'new-project' });
+    expect(adapter.setAccountProjectId).toHaveBeenCalledExactlyOnceWith({
+      ...input,
+      projectId: 'new-project',
+    });
+    await expect(
+      client.setAccountProjectId({ ...input, projectId: 'projects/invalid' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(adapter.setAccountProjectId).toHaveBeenCalledTimes(1);
+  });
+
   it('serializes the selected account adapter view for listing', async () => {
     const adapter = mockAdapter();
     vi.mocked(adapter.listViews).mockResolvedValueOnce([
@@ -287,15 +315,43 @@ describe('cloud account renderer IPC', () => {
     }
   });
 
+  it('exposes a prepared OAuth capability and only accepts owner-controlled browser actions', async () => {
+    const adapter = mockAdapter();
+    const handle = { sessionId: '11111111-1111-4111-8111-111111111111' };
+    const session = {
+      prepare: vi.fn(async () => handle),
+      open: vi.fn(),
+      copy: vi.fn(),
+      wait: vi.fn(),
+      submit: vi.fn(),
+      cancel: vi.fn(),
+    };
+    vi.mocked(adapter.getOAuthSession).mockResolvedValue(session);
+    const oauth = createRouterClient(cloudRouter).oauthSession;
+
+    await expect(oauth.prepare({ oauthClientKey: 'client-a' })).resolves.toEqual(handle);
+    expect(session.prepare).toHaveBeenCalledExactlyOnceWith('client-a');
+    const untrusted = { ...handle, authorizationUrl: 'https://example.test/oauth' };
+    await expect(oauth.open(untrusted)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(session.open).not.toHaveBeenCalled();
+    await oauth.open(handle);
+    await oauth.copy(handle);
+    expect(session.open).toHaveBeenCalledExactlyOnceWith(handle.sessionId);
+    expect(session.copy).toHaveBeenCalledExactlyOnceWith(handle.sessionId);
+  });
+
   it('accepts only a bounded pasted code and returns no authorization data', async () => {
     const adapter = mockAdapter();
     const client = createRouterClient(cloudRouter);
 
     expect(await client.submitAuthCode({ code: '4/manual-code' })).toBeUndefined();
     expect(adapter.submitLoginCode).toHaveBeenCalledExactlyOnceWith('4/manual-code');
-    await expect(client.submitAuthCode({ code: 'bad code' })).rejects.toThrow();
+    const callback = 'http://127.0.0.1:1234/oauth-callback?code=4%2Fsynthetic&state=synthetic';
+    await expect(client.submitAuthCode({ code: callback })).resolves.toBeUndefined();
+    expect(adapter.submitLoginCode).toHaveBeenLastCalledWith(callback);
+    await expect(client.submitAuthCode({ code: ' ' })).rejects.toThrow();
     await expect(client.submitAuthCode({ code: 'x'.repeat(2049) })).rejects.toThrow();
-    expect(adapter.submitLoginCode).toHaveBeenCalledTimes(1);
+    expect(adapter.submitLoginCode).toHaveBeenCalledTimes(2);
 
     vi.mocked(adapter.submitLoginCode).mockRejectedValueOnce(
       new Error('private-code access_token provider stack'),

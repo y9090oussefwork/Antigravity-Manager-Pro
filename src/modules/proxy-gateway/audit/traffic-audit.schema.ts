@@ -65,10 +65,19 @@ export const upstreamAttempts = sqliteTable(
     attemptIndex: integer('attempt_index').notNull(),
     timestamp: integer('timestamp').notNull(),
     completedAt: integer('completed_at'),
+    timingJson: text('timing_json'),
     operation: text('operation').notNull(),
     endpoint: text('endpoint').notNull(),
     accountId: text('account_id'),
     accountIdHash: text('account_id_hash'),
+    accountGenerationHash: text('account_generation_hash'),
+    accountSubjectHash: text('account_subject_hash'),
+    accountGrantHash: text('account_grant_hash'),
+    usageScope: text('usage_scope'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    cachedTokens: integer('cached_tokens'),
+    reasoningTokens: integer('reasoning_tokens'),
     model: text('model'),
     requestHeaders: text('request_headers').notNull(),
     status: integer('status'),
@@ -176,6 +185,11 @@ export const auditAdminEvents = sqliteTable('audit_admin_events', {
   outcome: text('outcome').notNull(),
   affectedCount: integer('affected_count'),
   error: text('error'),
+});
+
+export const auditSchemaMeta = sqliteTable('schema_meta', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
 });
 
 export const trafficAuditSchema = {

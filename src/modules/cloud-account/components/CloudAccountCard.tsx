@@ -57,6 +57,7 @@ import { useState, useRef } from 'react';
 import { useAccountModelAvailability } from '../hooks/useAccountModelAvailability';
 import { ipc } from '@/ipc/manager';
 import { CloudAccountProxyDialog } from '@/modules/cloud-account/components/CloudAccountProxyDialog';
+import { CloudAccountProjectIdDialog } from '@/modules/cloud-account/components/CloudAccountProjectIdDialog';
 import { getCloudAccountBlockedStatusLabel } from '@/modules/cloud-account/utils/accountValidationStatus';
 import type { AntigravityAppTarget } from '@/shared/platform/antigravityAppTarget';
 import { AccountTierBadge } from '@/modules/cloud-account/components/AccountTierBadge';
@@ -70,12 +71,13 @@ import type { QuotaWindow } from '@/modules/cloud-account/utils/quota-groups';
 import { DetailedQuotaDisplay } from '@/modules/cloud-account/components/DetailedQuotaDisplay';
 import { CompactQuotaSummary } from '@/modules/cloud-account/components/CompactQuotaSummary';
 import { AccountQuotaWindowSections } from '@/modules/cloud-account/components/AccountQuotaWindowSections';
+import { CurrentCycleUsage } from '@/modules/cloud-account/components/CurrentCycleUsage';
 import {
   CompactModelQuotaDisplay,
   type CompactModelQuotaItem,
 } from '@/modules/cloud-account/components/CompactModelQuotaDisplay';
 import { ManualRecommendationBadge } from '@/modules/cloud-account/components/ManualRecommendationBadge';
-import type { ManualRecommendationContext } from '@/modules/cloud-account/utils/manual-account-recommendation';
+import type { ManualAccountRecommendation } from '@/modules/cloud-account/utils/manual-account-recommendation';
 import { QUOTA_TEXT_COLOR_CLASS_BY_STATUS, QUOTA_BAR_COLOR_CLASS_BY_STATUS } from './quota-colors';
 import { isWeeklyQuotaBucket } from '@/modules/cloud-account/utils/quota-groups';
 import { useOpenAccountValidationLink } from '@/modules/cloud-account/hooks/useOpenAccountValidationLink';
@@ -247,7 +249,7 @@ interface CloudAccountCardProps {
   isRefreshing?: boolean;
   isDeleting?: boolean;
   isSwitching?: boolean;
-  recommendationContext?: ManualRecommendationContext;
+  recommendations?: readonly ManualAccountRecommendation[];
 }
 
 export function CloudAccountCard({
@@ -268,7 +270,7 @@ export function CloudAccountCard({
   isRefreshing,
   isDeleting,
   isSwitching,
-  recommendationContext,
+  recommendations,
 }: CloudAccountCardProps) {
   const { t, i18n } = useTranslation();
   const { toast: defaultToast } = useToast();
@@ -703,7 +705,7 @@ export function CloudAccountCard({
 
       <CardContent className="flex-1 px-5 pt-0 pb-5 [@media(max-width:760px)]:px-4">
         <div className="mb-4 flex items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <Badge
               variant={
                 account.status === 'rate_limited' ||
@@ -721,12 +723,13 @@ export function CloudAccountCard({
               unknownLabel={t('cloud.tierFilter.unknown')}
               className="min-h-6 rounded-sm px-2 py-0 text-xs leading-[22px] font-medium tracking-normal"
             />
-            {recommendationContext ? (
+            {recommendations?.map((recommendation) => (
               <ManualRecommendationBadge
-                context={recommendationContext}
+                key={recommendation.family}
+                recommendation={recommendation}
                 className="min-h-6 rounded-sm px-2 py-0 text-xs leading-[22px] font-medium tracking-normal"
               />
-            ) : null}
+            ))}
 
             {validationBlockedStatusLabel && (
               <span className="text-destructive bg-destructive/10 border-destructive/20 rounded border px-1.5 py-0.5 text-xs font-semibold">
@@ -816,7 +819,7 @@ export function CloudAccountCard({
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => onSwitch(account.id, 'agy')}
-                  disabled={isSwitching || account.is_active_agy}
+                  disabled={isSwitching}
                   className="flex cursor-pointer items-center justify-between"
                 >
                   <span className="flex items-center gap-2">
@@ -909,6 +912,7 @@ export function CloudAccountCard({
                 )
               }
             />
+            <CurrentCycleUsage accountId={account.id} groups={account.quota?.quota_groups} />
           </div>
         )}
       </CardContent>
@@ -1008,7 +1012,16 @@ export function CloudAccountCard({
             </TooltipProvider>
           </div>
 
-          <CloudAccountProxyDialog accountId={account.id} configured={account.proxy_configured} />
+          {account.provider === 'google' && (
+            <CloudAccountProjectIdDialog accountId={account.id} email={account.email} />
+          )}
+          <CloudAccountProxyDialog
+            accountId={account.id}
+            configured={account.proxy_configured}
+            proxyPriority={account.proxy_priority ?? 50}
+            proxyPriorityOverrides={account.proxy_priority_overrides}
+            proxyEnabled={account.proxy_enabled !== false}
+          />
         </div>
       </CardFooter>
     </Card>
@@ -1032,7 +1045,7 @@ interface CompactCloudAccountCardProps {
   isDeleting?: boolean;
   isSwitching?: boolean;
   switchingTarget?: AntigravityAppTarget;
-  recommendationContext?: ManualRecommendationContext;
+  recommendations?: readonly ManualAccountRecommendation[];
 }
 
 export function CompactCloudAccountCard({
@@ -1051,7 +1064,7 @@ export function CompactCloudAccountCard({
   isRefreshing,
   isDeleting,
   isSwitching,
-  recommendationContext,
+  recommendations,
 }: CompactCloudAccountCardProps) {
   const { t } = useTranslation();
   const { toast: defaultToast } = useToast();
@@ -1163,7 +1176,7 @@ export function CompactCloudAccountCard({
     <div
       role="article"
       aria-label={account.email}
-      className="group bg-card hover:border-primary/40 flex items-center gap-3 rounded-lg border px-3 py-2 transition-all duration-200"
+      className="group bg-card hover:border-primary/40 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3 py-2 transition-all duration-200"
     >
       {account.avatar_url ? (
         <img
@@ -1197,9 +1210,6 @@ export function CompactCloudAccountCard({
             unknownLabel={t('cloud.tierFilter.unknown')}
             className="h-4 max-w-24 px-1 text-xs"
           />
-          {recommendationContext ? (
-            <ManualRecommendationBadge context={recommendationContext} />
-          ) : null}
         </div>
 
         <div className="text-muted-foreground truncate text-xs" title={account.email}>
@@ -1264,21 +1274,28 @@ export function CompactCloudAccountCard({
         ) : compactQuotaSummary ? (
           <CompactQuotaSummary quota={account.quota} />
         ) : (
-          <AccountQuotaWindowSections
-            quotaWindow={quotaWindow}
-            weeklyItems={
-              isMinimalMode
-                ? weeklyQuotaItems.filter(
-                    (item) => isGeminiWeeklyQuotaItem(item) || isClaudeOrGptWeeklyQuotaItem(item),
-                  )
-                : weeklyQuotaItems
-            }
-            fiveHourHidden={isMinimalMode ? false : fiveHourHidden}
-            weeklyHidden={isMinimalMode ? false : weeklyHidden}
-            hasQuotaSummary={account.quota?.quota_groups !== undefined}
-            variant="compact"
-            fiveHourContent={<CompactModelQuotaDisplay items={compactQuotaItems} />}
-          />
+          <>
+            <AccountQuotaWindowSections
+              quotaWindow={quotaWindow}
+              weeklyItems={
+                isMinimalMode
+                  ? weeklyQuotaItems.filter(
+                      (item) => isGeminiWeeklyQuotaItem(item) || isClaudeOrGptWeeklyQuotaItem(item),
+                    )
+                  : weeklyQuotaItems
+              }
+              fiveHourHidden={isMinimalMode ? false : fiveHourHidden}
+              weeklyHidden={isMinimalMode ? false : weeklyHidden}
+              hasQuotaSummary={account.quota?.quota_groups !== undefined}
+              variant="compact"
+              fiveHourContent={<CompactModelQuotaDisplay items={compactQuotaItems} />}
+            />
+            <CurrentCycleUsage
+              accountId={account.id}
+              groups={account.quota?.quota_groups}
+              compact
+            />
+          </>
         )}
       </div>
 
@@ -1336,7 +1353,7 @@ export function CompactCloudAccountCard({
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => onSwitch(account.id, 'agy')}
-                disabled={isSwitching || isAccountDisabled || account.is_active_agy}
+                disabled={isSwitching || isAccountDisabled}
                 className="flex cursor-pointer items-center justify-between"
               >
                 <span className="flex items-center gap-2">
@@ -1371,6 +1388,9 @@ export function CompactCloudAccountCard({
           </DropdownMenu>
         </div>
 
+        {account.provider === 'google' && (
+          <CloudAccountProjectIdDialog accountId={account.id} email={account.email} />
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="h-7 w-7 cursor-pointer rounded-full">
@@ -1413,6 +1433,16 @@ export function CompactCloudAccountCard({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      {recommendations?.length ? (
+        <div className="flex min-w-0 basis-full flex-wrap gap-1.5">
+          {recommendations.map((recommendation) => (
+            <ManualRecommendationBadge
+              key={recommendation.family}
+              recommendation={recommendation}
+            />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

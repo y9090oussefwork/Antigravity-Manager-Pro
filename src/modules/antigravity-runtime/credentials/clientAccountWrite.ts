@@ -14,14 +14,22 @@ import { createClientSqliteWriter, validateClientSqliteDestination } from './cli
 import {
   readAntigravityCredentialStoreToken,
   writeAntigravityCredentialStoreToken,
+  writeVerifiedWindowsAntigravityCredential,
 } from './antigravityCredentialStore';
-import { buildAntigravityCredentialPayload } from './antigravityCredentialPayload';
+import {
+  buildAntigravityCredentialPayload,
+  buildWindowsAgentCredentialPayload,
+} from './antigravityCredentialPayload';
 import { writeAgyCliToken } from './agyCliTokenStore';
 import { writeGoogleOAuthCredentials } from './googleOAuthCredentialStore';
 import { prepareMacOSClientAccountWrite } from './macosClientAccountWrite';
 import { CredentialReadbackError } from '@/shared/auth/credentialReadbackError';
 import { prepareWindowsIdeRecovery } from './windowsIdeRecovery';
-import { validateIdeStandaloneDestination, writeIdeStandaloneToken } from './ideStandaloneToken';
+import {
+  validateIdeStandaloneDestination,
+  writeIdeStandaloneCredentialPayload,
+  writeIdeStandaloneToken,
+} from './ideStandaloneToken';
 import { prepareLinuxIdeRecovery } from './linuxIdeRecovery';
 import { writeLinuxIdeCredentialPayload } from './linuxIdeCredentialStore';
 import {
@@ -30,6 +38,7 @@ import {
   writeMacOSKeychainPayload,
 } from './macosCredentialStore';
 import { writeMacOSServiceMachineId } from './macosClientSqlite';
+import { writeWindowsAgyAccount } from './windowsAgyAccountWrite';
 
 export type ClientAccountStorage = 'cli-session' | 'credential-store' | 'sqlite';
 
@@ -44,7 +53,9 @@ export async function resolveClientAccountStorage(
 ): Promise<ClientAccountStorage> {
   const target = resolveAntigravityAppTarget(appTarget);
   if (target === 'agy') {
-    return process.platform === 'darwin' ? 'credential-store' : 'cli-session';
+    return process.platform === 'win32' || process.platform === 'darwin'
+      ? 'credential-store'
+      : 'cli-session';
   }
   if (target === 'ide') {
     if (['win32', 'linux', 'darwin'].includes(process.platform)) {
@@ -97,11 +108,18 @@ export async function prepareClientAccountWrite(
   const credentials = prepareClientAccountCredentials(input);
   if (target === 'agy') {
     const payload = buildAntigravityCredentialPayload(credentials.token);
+    const windowsPayload =
+      process.platform === 'win32' ? buildWindowsAgentCredentialPayload(credentials) : undefined;
     return {
       storage,
       write: async () => {
+        const input = { ...credentials.token, email: credentials.email };
+        if (windowsPayload !== undefined) {
+          await writeWindowsAgyAccount(input, payload, windowsPayload);
+          return;
+        }
         writeAgyCliToken(payload);
-        writeGoogleOAuthCredentials({ ...credentials.token, email: credentials.email });
+        writeGoogleOAuthCredentials(input);
       },
     };
   }
@@ -172,6 +190,12 @@ export async function prepareClientAccountWrite(
           writeIdeStandaloneToken(credentials.token);
           return;
         }
+        if (syncIde && process.platform === 'win32') {
+          const payload = buildWindowsAgentCredentialPayload(credentials);
+          await writeVerifiedWindowsAntigravityCredential(payload);
+          writeIdeStandaloneCredentialPayload(payload);
+          return;
+        }
         await writeAntigravityCredentialStoreToken(
           credentials.token,
           target === 'classic' ? { syncClassicOAuthFile: true } : {},
@@ -195,9 +219,6 @@ export async function prepareClientAccountWrite(
               projectId: written?.projectId === (credentials.token.project_id || undefined),
             },
           );
-        }
-        if (syncIde) {
-          writeIdeStandaloneToken(credentials.token);
         }
       },
     };

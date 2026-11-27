@@ -14,7 +14,7 @@ describe('electron updater notification policy', () => {
       version: '0.19.0',
       tagName: 'v0.19.0',
       releaseName: 'Antigravity Manager 0.19.0',
-      releaseUrl: 'https://github.com/Draculabo/AntigravityManager/releases/tag/v0.19.0',
+      releaseUrl: 'https://github.com/y9090oussefwork/Antigravity-Manager-Pro/releases/tag/v0.19.0',
       platform: 'win32',
       source: 'electron-updater',
       state: 'available',

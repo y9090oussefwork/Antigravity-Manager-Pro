@@ -30,6 +30,10 @@ import {
   SetCloudAccountProxyInputSchema,
 } from '@/modules/cloud-account/services/cloud-account-mutation.schema';
 import {
+  CloudAccountRoutingResultSchema,
+  SetCloudAccountRoutingInputSchema,
+} from '@/modules/cloud-account/services/cloud-account-routing.schema';
+import {
   ActiveOAuthClientSchema,
   OAuthClientDescriptorSchema,
   SetActiveOAuthClientInputSchema,
@@ -66,8 +70,15 @@ export {
   parseCloudAccountSwitchORPCErrorData,
 } from '@/modules/cloud-account/services/cloud-account-switch.schema';
 
+import { createCloudAccountProjectIdProcedures } from './cloud-account-project-id-router';
+import { desktopOAuthSessionRouter } from './desktop-oauth-session-router';
+import { cloudAccountCredentialImportRouter } from './cloud-account-credential-import-router';
+
 export const cloudRouter = os.router({
   localImport: localAccountImportRouter,
+  oauthSession: desktopOAuthSessionRouter,
+  credentialImport: cloudAccountCredentialImportRouter,
+  ...createCloudAccountProjectIdProcedures(getCloudAccountAdapter),
 
   listCloudAccounts: os.output(z.array(CloudAccountViewSchema)).handler(async () => {
     return getCloudAccountAdapter().listViews();
@@ -226,6 +237,18 @@ export const cloudRouter = os.router({
     .output(z.void())
     .handler(async ({ input }) => {
       await getCloudAccountAdapter().setProxy(input.accountId, input.proxyUrl);
+    }),
+
+  setAccountRouting: os
+    .input(SetCloudAccountRoutingInputSchema)
+    .output(CloudAccountRoutingResultSchema)
+    .handler(async ({ input }) => {
+      const setRouting = getCloudAccountAdapter().setRouting;
+      if (!setRouting) {
+        throw new Error('Cloud account routing settings are unavailable');
+      }
+      await setRouting(input);
+      return { success: true };
     }),
 
   syncLocalAccount: os

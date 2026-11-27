@@ -1,7 +1,11 @@
 import { getCloudAccountSwitchStatus } from '../services/cloud-account-switch-status.service';
+import type { SetCloudAccountRoutingInput } from '../services/cloud-account-routing.schema';
+import { setCloudAccountRouting } from '../services/cloud-account-routing.service';
 import type { CloudAccountSwitchStatus } from '../services/cloud-account-switch-status.schema';
 import { localAccountImportCoordinator } from '../local-import/local-account-import-coordinator.service';
 import type { LocalAccountImportOwner } from '../local-import/transport.router';
+import type { CloudAccountCredentialImport } from '../services/cloud-account-credential-import.schema';
+import { importCloudAccountRefreshToken } from '../services/cloud-account-credential-import.service';
 import { cloudAccountMonitorControl } from '../services/cloud-account-monitor-control.service';
 import type { AutoSwitchModelConfig } from '../types';
 import type { WeeklyWarmupConfig } from '../services/weekly-warmup-contract';
@@ -21,6 +25,7 @@ import {
   type CloudAccountView,
 } from '@/modules/cloud-account/services/cloud-account-view';
 import { CloudAccountRepo } from '@/modules/cloud-account/persistence/cloudHandler';
+import { deleteCloudAccount } from '../services/cloud-account-deletion.service';
 import {
   getActiveOAuthClient,
   listOAuthClients,
@@ -42,7 +47,13 @@ import {
   restoreCloudIdentityProfileRevision,
 } from '@/modules/cloud-account/services/cloud-account-identity-profile.service';
 
-export interface CloudAccountAdapter {
+import type { CloudAccountProjectIdOperations } from '../services/cloud-account-project-id.schema';
+import { cloudAccountProjectId } from '../services/cloud-account-project-id.service';
+import { logger } from '@/shared/logging/logger';
+import type { PreparedDesktopOAuthOperations } from './prepared-desktop-oauth';
+
+export interface CloudAccountAdapter extends CloudAccountProjectIdOperations {
+  importCredential: CloudAccountCredentialImport;
   getSwitchStatus(): Promise<CloudAccountSwitchStatus>;
   localImport: LocalAccountImportOwner;
   getAutoSwitchEnabled(): Promise<boolean>;
@@ -54,6 +65,7 @@ export interface CloudAccountAdapter {
   setWeeklyWarmupConfig(config: WeeklyWarmupConfig): Promise<void>;
   importFile(filePath: string, strategy: ImportStrategy): Promise<CloudAccountImportSummary>;
   exportFile(filePath: string, stripTokens: boolean): Promise<{ status: 'saved' }>;
+  getOAuthSession(): Promise<PreparedDesktopOAuthOperations>;
   startLogin(oauthClientKey?: string): Promise<CloudAccountView>;
   submitLoginCode(code: string): Promise<void>;
   stopLogin(): Promise<void>;
@@ -65,6 +77,7 @@ export interface CloudAccountAdapter {
   getSecurityStatus(): Promise<CloudAccountSecurityStatus>;
   openValidationLink(accountId: string): Promise<void>;
   setProxy(accountId: string, proxyUrl: string | null): Promise<void>;
+  setRouting?(input: SetCloudAccountRoutingInput): Promise<void>;
   delete(accountId: string): Promise<void>;
   listOAuthClients(): Promise<OAuthClientDescriptor[]>;
   getActiveOAuthClient(): Promise<string>;
@@ -103,6 +116,9 @@ type StandaloneCoreCloudAccountClient = Pick<
   | 'accountSecurityStatus'
   | 'resolveAccountValidationUrl'
   | 'setAccountProxy'
+  | 'getAccountProjectId'
+  | 'setAccountProjectId'
+  | 'fetchAccountProjectId'
   | 'deleteCloudAccount'
   | 'listOAuthClients'
   | 'getActiveOAuthClient'
@@ -114,7 +130,10 @@ type StandaloneCoreCloudAccountClient = Pick<
   | 'restoreIdentityProfileRevision'
   | 'restoreBaselineProfile'
   | 'deleteIdentityProfileRevision'
->;
+> & {
+  setAccountRouting?: CoreRpcClient['setAccountRouting'];
+  importCloudAccountCredential?: CoreRpcClient['importCloudAccountCredential'];
+};
 
 export type CloudAccountAdapterSelection =
   | { mode: 'desktop-embedded' }
@@ -128,7 +147,9 @@ export type CloudAccountAdapterSelection =
     };
 
 function createDesktopEmbeddedAdapter(): CloudAccountAdapter {
+  const getLogin = async () => (await import('./desktop-oauth-login')).desktopOAuthLogin;
   return {
+    importCredential: importCloudAccountRefreshToken,
     localImport: {
       preview: () => localAccountImportCoordinator.preview(),
       confirm: (id) => localAccountImportCoordinator.confirm(id),
@@ -145,18 +166,12 @@ function createDesktopEmbeddedAdapter(): CloudAccountAdapter {
     setWeeklyWarmupConfig: cloudAccountMonitorControl.setWeeklyWarmupConfig,
     importFile: importCloudAccountFile,
     exportFile: exportCloudAccountFile,
-    startLogin: async (oauthClientKey) => {
-      const { desktopOAuthLogin } = await import('./desktop-oauth-login');
-      return desktopOAuthLogin.start(oauthClientKey);
-    },
+    getOAuthSession: async () => (await getLogin()).prepared,
+    startLogin: async (oauthClientKey) => (await getLogin()).start(oauthClientKey),
     submitLoginCode: async (code) => {
-      const { desktopOAuthLogin } = await import('./desktop-oauth-login');
-      desktopOAuthLogin.submitCode(code);
+      (await getLogin()).submitCode(code);
     },
-    stopLogin: async () => {
-      const { desktopOAuthLogin } = await import('./desktop-oauth-login');
-      await desktopOAuthLogin.stop();
-    },
+    stopLogin: async () => (await getLogin()).stop(),
     switchAccount: async (accountId, appTarget) => {
       const { switchCloudAccountForDesktop } = await import('./cloud-account-switch-desktop');
       await switchCloudAccountForDesktop(accountId, appTarget);
@@ -179,7 +194,9 @@ function createDesktopEmbeddedAdapter(): CloudAccountAdapter {
       await openTrustedAccountValidationUrl(url);
     },
     setProxy: async (accountId, proxyUrl) => CloudAccountRepo.setAccountProxy(accountId, proxyUrl),
-    delete: (accountId) => CloudAccountRepo.removeAccount(accountId),
+    ...cloudAccountProjectId,
+    setRouting: setCloudAccountRouting,
+    delete: deleteCloudAccount,
     listOAuthClients: async () => listOAuthClients(),
     getActiveOAuthClient: async () => getActiveOAuthClient(),
     setActiveOAuthClient: async (clientKey) => setActiveOAuthClient(clientKey),
@@ -210,6 +227,11 @@ function createStandaloneCoreAdapter(
     return standaloneCoreLogin;
   };
   return {
+    importCredential: async (input) =>
+      (await client.importCloudAccountCredential?.(input)) ?? {
+        status: 'failed',
+        reason: 'save-failed',
+      },
     localImport: {
       preview: () => client.localImportPreview(),
       confirm: (sessionId) => client.localImportConfirm(sessionId),
@@ -226,6 +248,7 @@ function createStandaloneCoreAdapter(
     setWeeklyWarmupConfig: (config) => client.setWeeklyWarmupConfig(config),
     importFile: (filePath, strategy) => client.importAccountFile(filePath, strategy),
     exportFile: (filePath, stripTokens) => client.exportAccountFile(filePath, stripTokens),
+    getOAuthSession: async () => (await getStandaloneCoreLogin()).prepared,
     startLogin: async (oauthClientKey) => (await getStandaloneCoreLogin()).start(oauthClientKey),
     submitLoginCode: async (code) => (await getStandaloneCoreLogin()).submitCode(code),
     stopLogin: async () => {
@@ -233,7 +256,13 @@ function createStandaloneCoreAdapter(
     },
     switchAccount: (accountId, appTarget) => client.switchCloudAccount(accountId, appTarget),
     listViews: () => client.accountViews(),
-    refreshQuota: (accountId) => client.refreshAccountQuota(accountId),
+    refreshQuota: async (accountId) => {
+      const account = await client.refreshAccountQuota(accountId);
+      import('@/modules/app-shell/ipc/tray/handler')
+        .then(({ refreshTrayAccount }) => refreshTrayAccount())
+        .catch(() => logger.warn('Failed to load tray presentation after quota refresh'));
+      return account;
+    },
     clearServiceDisabled: (accountId) => client.clearServiceDisabled(accountId),
     syncFromIde: (appTarget) => client.syncFromIde(appTarget),
     getSecurityStatus: () => client.accountSecurityStatus(),
@@ -243,6 +272,15 @@ function createStandaloneCoreAdapter(
       await openTrustedAccountValidationUrl(url);
     },
     setProxy: (accountId, proxyUrl) => client.setAccountProxy(accountId, proxyUrl),
+    getAccountProjectId: (input) => client.getAccountProjectId(input),
+    setAccountProjectId: (input) => client.setAccountProjectId(input),
+    fetchAccountProjectId: (input) => client.fetchAccountProjectId(input),
+    setRouting: async (input) => {
+      if (!client.setAccountRouting) {
+        throw new Error('Standalone core does not support account routing settings');
+      }
+      await client.setAccountRouting(input);
+    },
     delete: (accountId) => client.deleteCloudAccount(accountId),
     listOAuthClients: () => client.listOAuthClients(),
     getActiveOAuthClient: () => client.getActiveOAuthClient(),

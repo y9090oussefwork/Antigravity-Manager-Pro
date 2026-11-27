@@ -3,8 +3,8 @@ import {
   buildResponsesChatRequest,
   normalizeResponsesMessageContent,
   parseResponsesRequestBody,
-} from '@/modules/proxy-gateway/server/modules/openai/responses/openai-responses-request';
-import { mergeOpenAIResponsesInputItems } from '@/modules/proxy-gateway/server/modules/openai/responses/openai-responses-session.store';
+} from '@/server/gateway/modules/openai/responses/openai-responses-request';
+import { mergeOpenAIResponsesInputItems } from '@/server/gateway/modules/openai/responses/openai-responses-session.store';
 
 describe('Responses input compatibility', () => {
   it('validates a WebSocket Responses request before mapping it', () => {
@@ -58,7 +58,7 @@ describe('Responses input compatibility', () => {
   });
 
   it.each([undefined, null, 4, false])(
-    'filters commentary with type %s without rewriting stored items',
+    'retains provider commentary with type %s without rewriting stored items',
     (type) => {
       const history = [
         { type, role: 'assistant', phase: 'commentary', content: 'Display only.' },
@@ -69,6 +69,7 @@ describe('Responses input compatibility', () => {
         { role: 'user', content: 'Continue.' },
       ]);
       expect(buildResponsesChatRequest({ input }).messages).toEqual([
+        { role: 'assistant', content: 'Display only.' },
         { role: 'assistant', content: 'The answer is 41.' },
         { role: 'user', content: 'Continue.' },
       ]);
@@ -89,6 +90,23 @@ describe('Responses input compatibility', () => {
         [],
       ),
     ).toEqual([]);
+  });
+
+  it('keeps final-answer text separate from a pending call', () => {
+    const input = [
+      { type: 'function_call', call_id: 'call_read', name: 'read', arguments: '{}' },
+      { type: 'message', role: 'assistant', phase: 'final_answer', content: 'This is an answer.' },
+      { type: 'function_call_output', call_id: 'call_read', output: 'contents' },
+    ];
+
+    expect(buildResponsesChatRequest({ input }).messages).toEqual([
+      {
+        role: 'assistant', content: '',
+        tool_calls: [{ id: 'call_read', type: 'function', function: { name: 'read', arguments: '{}' } }],
+      },
+      { role: 'assistant', content: 'This is an answer.' },
+      { role: 'tool', tool_call_id: 'call_read', name: 'read', content: 'contents' },
+    ]);
   });
 
   it('preserves untyped text, empty text separators, and text priority over images', () => {
@@ -142,6 +160,28 @@ describe('Responses input compatibility', () => {
     ).toEqual([{ role: 'user', content: 'Default role.' }]);
   });
 
+  it('preserves the location of mid-conversation system and developer messages', () => {
+    const messages = buildResponsesChatRequest({
+      instructions: 'Initial instruction.',
+      input: [
+        { type: 'message', role: 'user', content: 'Inspect.' },
+        { type: 'message', role: 'assistant', content: 'Inspection complete.' },
+        { type: 'message', role: 'system', content: 'Reminder S2.' },
+        { type: 'message', role: 'developer', content: 'Reminder D2.' },
+        { type: 'message', role: 'user', content: 'Continue.' },
+      ],
+    }).messages;
+
+    expect(messages.map((message) => message.role)).toEqual([
+      'system',
+      'user',
+      'assistant',
+      'system',
+      'developer',
+      'user',
+    ]);
+  });
+
   it.each(['user', 'assistant', 'system'])(
     'ignores empty-type %s history without mutating the raw items',
     (role) => {
@@ -177,12 +217,12 @@ describe('Responses input compatibility', () => {
     },
   );
 
-  it('retains the empty-user fallback when every input item is ignored', () => {
+  it('leaves empty history for generation admission when every input item is ignored', () => {
     expect(
       buildResponsesChatRequest({
         input: [{ type: '', role: 'assistant', content: 'Ignored prefill.' }],
       }).messages,
-    ).toEqual([{ role: 'user', content: '' }]);
+    ).toEqual([]);
   });
 
   it('does not change object serialization for top-level input or tool output', () => {
@@ -282,7 +322,7 @@ describe('Responses input compatibility', () => {
     expect(request.messages.at(-1)?.content).toBe('[{"value":41}]');
   });
 
-  it('compacts repeated apply_patch failures without dropping tool media', () => {
+  it('keeps all seven apply_patch failures with their media and call IDs', () => {
     const input: unknown[] = [{ role: 'user', content: 'Apply the patch.' }];
     for (let index = 1; index <= 7; index += 1) {
       input.push(
@@ -306,12 +346,18 @@ describe('Responses input compatibility', () => {
       );
     }
 
-    expect(buildResponsesChatRequest({ input }).messages.at(-1)?.content).toEqual([
-      {
-        type: 'text',
-        text: '[Additional apply_patch failure omitted to avoid a retry loop. Produce a fresh V4A patch from current file contents instead of repeating previous failed patches.]',
-      },
-      { type: 'image_url', image_url: { url: 'data:image/png;base64,AQ==' } },
-    ]);
+    expect(
+      buildResponsesChatRequest({ input }).messages.filter((message) => message.role === 'tool'),
+    ).toEqual(
+      Array.from({ length: 7 }, (_, index) => ({
+        role: 'tool',
+        name: 'apply_patch',
+        tool_call_id: `call_patch_${index + 1}`,
+        content: [
+          { type: 'text', text: `apply_patch verification failed\nDistinct failure ${index + 1}` },
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,AQ==' } },
+        ],
+      })),
+    );
   });
 });

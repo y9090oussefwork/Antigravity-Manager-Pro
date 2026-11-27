@@ -1,3 +1,4 @@
+import { responsesIdentityFixture } from './responses-identity.fixture';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,9 +8,10 @@ import {
   OpenAIResponsesSessionStoreImpl,
   mergeOpenAIResponsesInputItems,
   prepareOpenAIResponsesSessionInput,
-} from '@/modules/proxy-gateway/server/modules/openai/responses/openai-responses-session.store';
-import { buildResponsesChatRequest } from '@/modules/proxy-gateway/server/modules/openai/responses/openai-responses-request';
-import { toOpenAIResponsesResponse } from '@/modules/proxy-gateway/antigravity/OpenAIResponsesResponseMapper';
+} from '@/server/gateway/modules/openai/responses/openai-responses-session.store';
+import { OPENAI_RESPONSES_SESSION_FILENAME } from '@/server/gateway/modules/openai/responses/openai-responses-session.service';
+import { buildResponsesChatRequest } from '@/server/gateway/modules/openai/responses/openai-responses-request';
+import { toOpenAIResponsesResponse } from '@/server/gateway/modules/openai/responses/OpenAIResponsesResponseMapper';
 
 const fixtureText = fs.readFileSync(
   path.resolve('src/tests/fixtures/responses-format-v1/old-responses-session.json'),
@@ -45,14 +47,49 @@ afterEach(() => {
   }
 });
 
-describe('sessions written before reasoning format upgrade', () => {
-  it('replays the exact old response and restores its tool call after a restart', async () => {
+describe('Responses reasoning history in the current store', () => {
+  it('replays the exact response and restores its tool call after restart', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(1_800_000_001_000);
     directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agm-upgrade-'));
-    const filePath = path.join(directory, 'sessions.json');
-    fs.writeFileSync(filePath, JSON.stringify(fixture));
+    const filePath = path.join(directory, OPENAI_RESPONSES_SESSION_FILENAME);
+    const writer = new OpenAIResponsesSessionStoreImpl({ filePath });
+    writer.save('resp_before_restart', {
+      identity: responsesIdentityFixture,
+      inputItems: fixture.entries[0].value.inputItems,
+      instructions: 'Only use the provided safe fixture.',
+      model: 'gemini-3-flash',
+      response: z.record(z.string(), z.unknown()).parse(fixture.entries[0].value.response),
+      tools: [
+        {
+          type: 'function',
+          function: { name: 'read_fixture', parameters: { type: 'object' } },
+        },
+      ],
+    });
+    await writer.flush();
+    const snapshot = z
+      .object({
+        version: z.literal(1),
+        entries: z.array(
+          z.object({
+            key: z.string(),
+            updatedAt: z.number(),
+            value: z.object({ node: z.object({}).passthrough() }).passthrough(),
+          }),
+        ),
+      })
+      .parse(JSON.parse(fs.readFileSync(filePath, 'utf8')));
+    const storedEntry = snapshot.entries[0];
+    snapshot.entries.push({
+      ...storedEntry,
+      key: 'resp_legacy_inputs',
+      value: {
+        node: { ...storedEntry.value.node, inputDelta: fixture.entries[1].value.inputItems },
+      },
+    });
+    fs.writeFileSync(filePath, JSON.stringify(snapshot));
     const store = new OpenAIResponsesSessionStoreImpl({ filePath });
-    const old = store.get('resp_before_upgrade');
+    const old = store.get('resp_before_restart');
     expect(old?.response).toEqual(fixture.entries[0].value.response);
     expect(old?.inputItems).toEqual(fixture.entries[0].value.inputItems);
     const items = mergeOpenAIResponsesInputItems(
@@ -83,6 +120,10 @@ describe('sessions written before reasoning format upgrade', () => {
       { role: 'user', content: 'Remember fixture number 41.' },
       {
         role: 'assistant',
+        content: 'I will inspect the fixture.',
+      },
+      {
+        role: 'assistant',
         content: '',
         tool_calls: [
           {
@@ -101,25 +142,20 @@ describe('sessions written before reasoning format upgrade', () => {
       { role: 'user', content: 'Add one.' },
     ]);
     // GET payloads remain exact; continuation input is sanitized at the storage boundary.
-    store.save('resp_after_upgrade', { model: 'gemini-3-flash', inputItems: items });
+    store.save('resp_after_restart', {
+      identity: responsesIdentityFixture,
+      model: 'gemini-3-flash',
+      inputItems: items,
+    });
     await store.flush();
     const restarted = new OpenAIResponsesSessionStoreImpl({ filePath });
-    expect(restarted.get('resp_before_upgrade')?.response).toEqual(old?.response);
-    expect(JSON.stringify(restarted.get('resp_after_upgrade')?.inputItems)).not.toContain(
+    expect(restarted.get('resp_before_restart')?.response).toEqual(old?.response);
+    expect(JSON.stringify(restarted.get('resp_after_restart')?.inputItems)).not.toContain(
       'data:image/',
     );
     expect(JSON.parse(fs.readFileSync(filePath, 'utf8')).version).toBe(1);
-    const legacy = restarted.get('resp_legacy_inputs');
-    expect(JSON.stringify(legacy?.inputItems)).not.toContain('data:image/');
-    expect(
-      buildResponsesChatRequest({ model: legacy?.model, input: legacy?.inputItems }).messages,
-    ).toEqual([
-      { role: 'user', content: '' },
-      { role: 'user', content: '[historical image omitted]' },
-    ]);
-    expect(JSON.stringify(restarted.get('resp_legacy_inputs')?.inputItems)).not.toContain(
-      'data:image/',
-    );
+    expect(restarted.get('resp_legacy_inputs')).toBeNull();
+    await restarted.flush();
   });
   it.each(['', ' \n\t', ' keep whitespace '])(
     'normalizes reasoning and zero usage at the JSON exit only: %j',
@@ -290,6 +326,7 @@ describe('Responses parent-linked session history', () => {
   it('keeps sibling branches independent after their direct parent key is deleted', () => {
     const store = new OpenAIResponsesSessionStoreImpl();
     store.saveDelta('resp_root', {
+      identity: responsesIdentityFixture,
       inputDelta: [rootInput],
       model: 'gemini-3-flash',
       responseOutput: [rootOutput],
@@ -300,12 +337,14 @@ describe('Responses parent-linked session history', () => {
     expect(parentB).not.toBeNull();
 
     store.saveDelta('resp_a', {
+      identity: responsesIdentityFixture,
       inputDelta: [{ id: 'msg_a', type: 'message', role: 'user', content: 'branch a' }],
       model: 'gemini-3-flash',
       parent: parentA?.parent,
       responseOutput: [{ id: 'out_a', type: 'message', role: 'assistant', content: 'answer a' }],
     });
     store.saveDelta('resp_b', {
+      identity: responsesIdentityFixture,
       inputDelta: [{ id: 'msg_b', type: 'message', role: 'user', content: 'branch b' }],
       model: 'gemini-3-flash',
       parent: parentB?.parent,
@@ -330,12 +369,14 @@ describe('Responses parent-linked session history', () => {
     const filePath = path.join(directory, 'sessions.json');
     const writer = new OpenAIResponsesSessionStoreImpl({ filePath });
     writer.saveDelta('resp_root', {
+      identity: responsesIdentityFixture,
       inputDelta: [rootInput],
       model: 'gemini-3-flash',
       responseOutput: [rootOutput],
     });
     const root = writer.getWithParent('resp_root');
     writer.saveDelta('resp_child', {
+      identity: responsesIdentityFixture,
       inputDelta: [{ id: 'msg_child', type: 'message', role: 'user', content: 'child' }],
       model: 'gemini-3-flash',
       parent: root?.parent,
@@ -365,6 +406,7 @@ describe('Responses parent-linked session history', () => {
       restarted.get('resp_child')?.inputItems.map((item) => Reflect.get(item as object, 'id')),
     ).toEqual(['msg_root', 'out_root', 'msg_child', 'out_child']);
     expect(restarted.get('resp_child')?.response?.id).toBe('resp_child');
+    await restarted.flush();
   });
 
   it('starts a new storage root when compaction resets history', () => {

@@ -1,13 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  CheckCircle2,
-  DatabaseZap,
-  Loader2,
-  RefreshCcw,
-  ShieldCheck,
-  TriangleAlert,
-} from 'lucide-react';
+import { CheckCircle2, Loader2, RefreshCcw, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { get, isString } from 'lodash-es';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -18,18 +11,22 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog';
 import { getLocalizedErrorMessage } from '@/shared/utils/errorMessages';
 import type { LocalAccountImportPreview, LocalAccountImportResult } from '../actions';
 import { useLocalAccountImport } from '../hooks/useLocalAccountImport';
 
-type DialogPhase = 'idle' | 'scanning' | 'preview' | 'importing' | 'result' | 'error';
+type ImportState =
+  | { phase: 'idle' | 'scanning' | 'importing' }
+  | { phase: 'preview'; preview: LocalAccountImportPreview }
+  | { phase: 'result'; result: LocalAccountImportResult }
+  | { phase: 'error'; message: string };
 
 const SOURCE_I18N_KEYS = {
   'antigravity-keyring': 'cloud.localImport.sources.antigravity-keyring',
   'antigravity-classic-db': 'cloud.localImport.sources.antigravity-classic-db',
   'antigravity-ide-db': 'cloud.localImport.sources.antigravity-ide-db',
+  'antigravity-agy-file': 'cloud.localImport.sources.antigravity-agy-file',
   'legacy-agent': 'cloud.localImport.sources.legacy-agent',
 } as const;
 
@@ -248,16 +245,11 @@ function ResultContent({ result }: { result: LocalAccountImportResult }) {
   );
 }
 
-export function LocalAccountImportDialog() {
+function useImportPanel(onBusyChange?: (busy: boolean) => void) {
   const { t } = useTranslation();
   const mutations = useLocalAccountImport();
-  const [isOpen, setIsOpen] = useState(false);
-  const [phase, setPhase] = useState<DialogPhase>('idle');
-  const [preview, setPreview] = useState<LocalAccountImportPreview | null>(null);
-  const [result, setResult] = useState<LocalAccountImportResult | null>(null);
-  const [errorMessage, setErrorMessage] = useState('');
+  const [state, setState] = useState<ImportState>({ phase: 'idle' });
   const generationRef = useRef(0);
-  const isOpenRef = useRef(false);
   const activeSessionIdRef = useRef<string | null>(null);
   const discardMutationRef = useRef(mutations.discard.mutateAsync);
 
@@ -265,7 +257,7 @@ export function LocalAccountImportDialog() {
     discardMutationRef.current = mutations.discard.mutateAsync;
   }, [mutations.discard.mutateAsync]);
 
-  const discardSession = useCallback(async (sessionId: string): Promise<void> => {
+  const discardSession = useCallback(async (sessionId: string) => {
     try {
       await discardMutationRef.current({ sessionId });
     } catch {
@@ -273,130 +265,233 @@ export function LocalAccountImportDialog() {
     }
   }, []);
 
-  const resetView = () => {
-    setPreview(null);
-    setResult(null);
-    setErrorMessage('');
-    mutations.preview.reset();
-    mutations.confirm.reset();
-  };
-
-  const startPreview = async (generation: number): Promise<void> => {
-    setPhase('scanning');
-    setErrorMessage('');
-    try {
-      const nextPreview = await mutations.preview.mutateAsync();
-      if (!isOpenRef.current || generationRef.current !== generation) {
-        await discardSession(nextPreview.sessionId);
-        return;
-      }
-      activeSessionIdRef.current = nextPreview.sessionId;
-      setPreview(nextPreview);
-      setPhase('preview');
-    } catch (error) {
-      if (isOpenRef.current && generationRef.current === generation) {
-        setErrorMessage(getImportErrorMessage(error, t));
-        setPhase('error');
-      }
-    }
-  };
-
-  const closeDialog = () => {
-    if (phase === 'importing') {
-      return;
-    }
-    isOpenRef.current = false;
+  const abandonPreview = useCallback(() => {
     generationRef.current += 1;
-    setIsOpen(false);
     const sessionId = activeSessionIdRef.current;
     activeSessionIdRef.current = null;
     if (sessionId) {
       discardSession(sessionId);
     }
-    resetView();
-    setPhase('idle');
+  }, [discardSession]);
+
+  useEffect(() => abandonPreview, [abandonPreview]);
+
+  const cancel = () => {
+    abandonPreview();
+    setState({ phase: 'idle' });
   };
 
-  const handleOpenChange = (open: boolean) => {
-    if (!open) {
-      closeDialog();
-      return;
+  const scan = async () => {
+    abandonPreview();
+    const generation = generationRef.current;
+    setState({ phase: 'scanning' });
+    try {
+      const preview = await mutations.preview.mutateAsync();
+      if (generationRef.current !== generation) {
+        await discardSession(preview.sessionId);
+        return;
+      }
+      activeSessionIdRef.current = preview.sessionId;
+      setState({ phase: 'preview', preview });
+    } catch (error) {
+      if (generationRef.current === generation) {
+        setState({ phase: 'error', message: getImportErrorMessage(error, t) });
+      }
     }
-    resetView();
-    setIsOpen(true);
-    isOpenRef.current = true;
-    const generation = generationRef.current + 1;
-    generationRef.current = generation;
-    startPreview(generation);
   };
 
-  const handleRescan = () => {
-    const previousSessionId = activeSessionIdRef.current;
-    activeSessionIdRef.current = null;
-    if (previousSessionId) {
-      discardSession(previousSessionId);
-    }
-    setPreview(null);
-    setResult(null);
-    const generation = generationRef.current + 1;
-    generationRef.current = generation;
-    startPreview(generation);
-  };
-
-  const handleConfirm = async () => {
+  const confirm = async () => {
     const sessionId = activeSessionIdRef.current;
-    if (!sessionId || !preview || preview.accounts.length === 0) {
+    if (!sessionId || state.phase !== 'preview' || state.preview.accounts.length === 0) {
       return;
     }
     const generation = generationRef.current;
-    setPhase('importing');
+    activeSessionIdRef.current = null;
+    onBusyChange?.(true);
+    setState({ phase: 'importing' });
     try {
-      const importResult = await mutations.confirm.mutateAsync({ sessionId });
-      activeSessionIdRef.current = null;
-      if (isOpenRef.current && generationRef.current === generation) {
-        setResult(importResult);
-        setPhase('result');
+      const result = await mutations.confirm.mutateAsync({ sessionId });
+      if (generationRef.current === generation) {
+        setState({ phase: 'result', result });
       }
     } catch (error) {
-      activeSessionIdRef.current = null;
-      if (isOpenRef.current && generationRef.current === generation) {
-        setErrorMessage(getImportErrorMessage(error, t));
-        setPhase('error');
+      discardSession(sessionId);
+      if (generationRef.current === generation) {
+        setState({ phase: 'error', message: getImportErrorMessage(error, t) });
       }
+    } finally {
+      onBusyChange?.(false);
     }
   };
 
-  useEffect(() => {
-    return () => {
-      isOpenRef.current = false;
-      generationRef.current += 1;
-      const sessionId = activeSessionIdRef.current;
-      activeSessionIdRef.current = null;
-      if (sessionId) {
-        discardSession(sessionId);
-      }
-    };
-  }, [discardSession]);
+  return { state, scan, cancel, confirm };
+}
+
+function LocalImportStatus({ state }: { state: ImportState }) {
+  const { t } = useTranslation();
+  switch (state.phase) {
+    case 'idle':
+      return <p className="text-muted-foreground text-sm">{t('cloud.localImport.description')}</p>;
+    case 'scanning':
+    case 'importing':
+      return (
+        <div
+          className="text-muted-foreground flex min-h-32 flex-col items-center justify-center gap-3 text-sm"
+          role="status"
+        >
+          <Loader2
+            className="text-primary size-6 animate-spin motion-reduce:animate-none"
+            aria-hidden="true"
+          />
+          <span>
+            {state.phase === 'scanning'
+              ? t('cloud.localImport.scanning')
+              : t('cloud.localImport.importing')}
+          </span>
+        </div>
+      );
+    case 'preview':
+      return <PreviewContent preview={state.preview} />;
+    case 'result':
+      return <ResultContent result={state.result} />;
+    case 'error':
+      return (
+        <div
+          className="border-destructive/30 bg-destructive/5 flex min-h-32 flex-col items-center justify-center gap-3 rounded-md border p-5 text-center"
+          role="alert"
+        >
+          <TriangleAlert className="text-destructive size-6" aria-hidden="true" />
+          <p className="text-sm">{state.message}</p>
+        </div>
+      );
+  }
+}
+
+function LocalImportActions({
+  panel,
+  onClose,
+}: {
+  panel: ReturnType<typeof useImportPanel>;
+  onClose?: () => void;
+}) {
+  const { t } = useTranslation();
+  const { state, scan, cancel, confirm } = panel;
+  const close = onClose ?? cancel;
+  switch (state.phase) {
+    case 'idle':
+      return <Button onClick={scan}>{t('cloud.localImport.scan')}</Button>;
+    case 'scanning':
+      return (
+        <Button variant="outline" onClick={close}>
+          {t('cloud.localImport.cancel')}
+        </Button>
+      );
+    case 'importing':
+      return null;
+    case 'preview':
+      return (
+        <>
+          <Button variant="outline" onClick={scan}>
+            <RefreshCcw className="size-4" aria-hidden="true" />
+            {t('cloud.localImport.rescan')}
+          </Button>
+          <Button variant="outline" onClick={close}>
+            {t('cloud.localImport.cancel')}
+          </Button>
+          <Button onClick={confirm} disabled={state.preview.accounts.length === 0}>
+            {t('cloud.localImport.confirm', { count: state.preview.accounts.length })}
+          </Button>
+        </>
+      );
+    case 'error':
+    case 'result':
+      return (
+        <>
+          {onClose && (
+            <Button variant={state.phase === 'error' ? 'outline' : 'default'} onClick={onClose}>
+              {t('cloud.localImport.close')}
+            </Button>
+          )}
+          {(!onClose || state.phase === 'error') && (
+            <Button onClick={scan}>
+              <RefreshCcw className="size-4" aria-hidden="true" />
+              {t('cloud.localImport.rescan')}
+            </Button>
+          )}
+        </>
+      );
+  }
+}
+
+export function LocalAccountImportPanel({
+  onBusyChange,
+}: {
+  onBusyChange?: (busy: boolean) => void;
+}) {
+  const panel = useImportPanel(onBusyChange);
+  return (
+    <div className="space-y-4">
+      <LocalImportStatus state={panel.state} />
+      {panel.state.phase !== 'importing' && (
+        <div className="flex flex-wrap justify-end gap-2">
+          <LocalImportActions panel={panel} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+export interface LocalAccountImportDialogHandle {
+  open: () => void;
+}
+
+export function LocalAccountImportDialog({
+  ref,
+  onCloseAutoFocus,
+}: {
+  ref: Ref<LocalAccountImportDialogHandle>;
+  onCloseAutoFocus?: (event: Event) => void;
+}) {
+  const { t } = useTranslation();
+  const panel = useImportPanel();
+  const [isOpen, setIsOpen] = useState(false);
+  const { phase } = panel.state;
+  const importing = phase === 'importing';
+
+  useImperativeHandle(ref, () => ({
+    open: () => {
+      setIsOpen(true);
+      panel.scan();
+    },
+  }));
+
+  const closeDialog = () => {
+    if (!importing) {
+      panel.cancel();
+      setIsOpen(false);
+    }
+  };
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        <Button variant="outline">
-          <DatabaseZap className="h-4 w-4" aria-hidden="true" />
-          {t('cloud.localImport.trigger')}
-        </Button>
-      </DialogTrigger>
+    <Dialog
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) {
+          closeDialog();
+        }
+      }}
+    >
       <DialogContent
         className="flex max-w-[620px] flex-col gap-0 overflow-hidden p-0"
-        closeDisabled={phase === 'importing'}
-        aria-busy={phase === 'scanning' || phase === 'importing'}
+        onCloseAutoFocus={onCloseAutoFocus}
+        closeDisabled={importing}
         onEscapeKeyDown={(event) => {
-          if (phase === 'importing') {
+          if (importing) {
             event.preventDefault();
           }
         }}
         onInteractOutside={(event) => {
-          if (phase === 'importing') {
+          if (importing) {
             event.preventDefault();
           }
         }}
@@ -405,78 +500,14 @@ export function LocalAccountImportDialog() {
           <DialogTitle>{t('cloud.localImport.title')}</DialogTitle>
           <DialogDescription>{t('cloud.localImport.description')}</DialogDescription>
         </DialogHeader>
-
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-          {(phase === 'scanning' || phase === 'importing') && (
-            <div
-              className="text-muted-foreground flex min-h-32 flex-col items-center justify-center gap-3 text-sm"
-              role="status"
-              aria-live="polite"
-            >
-              <Loader2
-                className="text-primary h-6 w-6 animate-spin motion-reduce:animate-none"
-                aria-hidden="true"
-              />
-              <span>
-                {phase === 'scanning'
-                  ? t('cloud.localImport.scanning')
-                  : t('cloud.localImport.importing')}
-              </span>
-            </div>
-          )}
-          {phase === 'preview' && preview && <PreviewContent preview={preview} />}
-          {phase === 'result' && result && <ResultContent result={result} />}
-          {phase === 'error' && (
-            <div
-              className="border-destructive/30 bg-destructive/5 flex min-h-32 flex-col items-center justify-center gap-3 rounded-md border p-5 text-center"
-              role="alert"
-            >
-              <TriangleAlert className="text-destructive h-6 w-6" aria-hidden="true" />
-              <p className="text-sm">{errorMessage}</p>
-            </div>
-          )}
+          {phase !== 'idle' && <LocalImportStatus state={panel.state} />}
         </div>
-
-        <DialogFooter className="shrink-0 border-t px-6 py-4">
-          {phase === 'preview' && (
-            <>
-              <Button variant="outline" onClick={handleRescan}>
-                <RefreshCcw className="h-4 w-4" aria-hidden="true" />
-                {t('cloud.localImport.rescan')}
-              </Button>
-              <Button variant="outline" onClick={closeDialog}>
-                {t('cloud.localImport.cancel')}
-              </Button>
-              <Button
-                onClick={() => {
-                  void handleConfirm();
-                }}
-                disabled={!preview || preview.accounts.length === 0}
-              >
-                {t('cloud.localImport.confirm', { count: preview?.accounts.length ?? 0 })}
-              </Button>
-            </>
-          )}
-          {phase === 'scanning' && (
-            <Button variant="outline" onClick={closeDialog}>
-              {t('cloud.localImport.cancel')}
-            </Button>
-          )}
-          {phase === 'error' && (
-            <>
-              <Button variant="outline" onClick={closeDialog}>
-                {t('cloud.localImport.close')}
-              </Button>
-              <Button onClick={handleRescan}>
-                <RefreshCcw className="h-4 w-4" aria-hidden="true" />
-                {t('cloud.localImport.rescan')}
-              </Button>
-            </>
-          )}
-          {phase === 'result' && (
-            <Button onClick={closeDialog}>{t('cloud.localImport.close')}</Button>
-          )}
-        </DialogFooter>
+        {phase !== 'idle' && !importing && (
+          <DialogFooter className="shrink-0 border-t px-6 py-4">
+            <LocalImportActions panel={panel} onClose={closeDialog} />
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   );

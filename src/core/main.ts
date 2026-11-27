@@ -75,7 +75,7 @@ async function runCore(): Promise<void> {
         process.once('SIGTERM', handleSignal);
       },
     });
-    logger.info('Standalone core service started');
+    logger.shareable('info', 'Standalone core service started');
   } catch (error) {
     logger.error('Standalone core service failed to start', error);
     process.exitCode = 1;
@@ -85,4 +85,4 @@ async function runCore(): Promise<void> {
   }
 }
 
-void runCore();
+runCore();

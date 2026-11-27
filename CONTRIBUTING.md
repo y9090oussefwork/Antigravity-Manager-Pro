@@ -10,7 +10,7 @@ Search existing issues and pull requests before opening a new one.
 
 | Contribution                          | Where to start                                                                                                                                                   |
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Report a bug                          | [Bug report](https://github.com/Draculabo/AntigravityManager/issues/new?template=bug_report.md): include the app version, platform and reproducible steps.       |
+| Report a bug                          | [Bug report](https://github.com/Draculabo/AntigravityManager/issues/new?template=bug_report.md). Write a short title. Add details if you can.                    |
 | Suggest a feature                     | [Feature request](https://github.com/Draculabo/AntigravityManager/issues/new?template=feature_request.md): explain the problem, use case and current workaround. |
 | Improve documentation                 | Make a focused correction, or use the [documentation index](docs/README.md) to find the owning guide.                                                            |
 | Fix code or improve the UI            | Start with an [existing issue](https://github.com/Draculabo/AntigravityManager/issues), nearby tests and the [module index](docs/modules/README.md).             |
@@ -58,14 +58,14 @@ require provider credentials; live-account and installer checks have separate pr
 
 ## Find the owning module
 
-| Area                                    | Location and guidance                                                                               |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Feature UI, hooks and business logic    | `src/modules/<feature>`; use the [module index](docs/modules/README.md).                            |
-| Routes                                  | `src/routes`; do not edit generated `src/routeTree.gen.ts`.                                         |
-| Generic UI                              | `src/components`; follow the existing Radix and Tailwind patterns.                                  |
-| Cross-feature primitives                | `src/shared`; move code here only when it has a real second consumer.                               |
-| API gateway                             | `src/modules/proxy-gateway/server`; see the [gateway guides](docs/modules/proxy-gateway/README.md). |
-| IPC, runtime and persistence boundaries | Read [Architecture](docs/architecture.md) and the nearest `AGENTS.md` before editing.               |
+| Area                                    | Location and guidance                                                                 |
+| --------------------------------------- | ------------------------------------------------------------------------------------- |
+| Feature UI, hooks and business logic    | `src/modules/<feature>`; use the [module index](docs/modules/README.md).              |
+| Routes                                  | `src/routes`; do not edit generated `src/routeTree.gen.ts`.                           |
+| Generic UI                              | `src/components`; follow the existing Radix and Tailwind patterns.                    |
+| Cross-feature primitives                | `src/shared`; move code here only when it has a real second consumer.                 |
+| API gateway                             | `src/server/gateway`; see the [gateway guides](docs/modules/proxy-gateway/README.md). |
+| IPC, runtime and persistence boundaries | Read [Architecture](docs/architecture.md) and the nearest `AGENTS.md` before editing. |
 
 Keep renderer code separate from main-process, filesystem and database implementations. Use
 the existing typed preload/IPC/ORPC surface for cross-process operations. Place user-visible
@@ -161,3 +161,11 @@ and explicitly accept limitations; reaching a round limit never clears an unreso
 If the scope expands, update the PR title and description so reviewers can assess the final
 change. Ask questions in the PR or [Discussions](https://github.com/Draculabo/AntigravityManager/discussions)
 when the next step is unclear.
+
+### Preserve contributor attribution
+
+Prefer reviewing and merging a contribution in its original PR when it can be accepted on its
+own. Keep the usual review and validation requirements. Put independent maintainer changes in a
+linked follow-up and describe what was added there. If a contribution needs to move to a different
+PR, link the original, identify which changes were carried over, and preserve verified authorship
+in the resulting commit.

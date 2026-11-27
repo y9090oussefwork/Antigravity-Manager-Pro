@@ -1,8 +1,14 @@
 import { ipc } from '@/ipc/manager';
+import type { SetCloudAccountRoutingInput } from '../services/cloud-account-routing.schema';
 import type { AntigravityAppTarget } from '@/shared/platform/antigravityAppTarget';
 import type { DeviceProfile } from '@/modules/identity-profile/types';
 import { isValidProxyUrl } from '@/shared/utils/url';
 import type { WeeklyWarmupConfig } from '@/modules/cloud-account/services/weekly-warmup-contract';
+import type {
+  FetchAccountProjectIdInput,
+  GetAccountProjectIdInput,
+  SetAccountProjectIdInput,
+} from '../services/cloud-account-project-id.schema';
 
 export function listCloudAccounts() {
   return ipc.client.cloud.listCloudAccounts();
@@ -10,6 +16,18 @@ export function listCloudAccounts() {
 
 export function deleteCloudAccount(input: { accountId: string }) {
   return ipc.client.cloud.deleteCloudAccount(input);
+}
+
+export function getAccountProjectId(input: GetAccountProjectIdInput) {
+  return ipc.client.cloud.getAccountProjectId(input);
+}
+
+export function setAccountProjectId(input: SetAccountProjectIdInput) {
+  return ipc.client.cloud.setAccountProjectId(input);
+}
+
+export function fetchAccountProjectId(input: FetchAccountProjectIdInput) {
+  return ipc.client.cloud.fetchAccountProjectId(input);
 }
 
 export function openAccountValidationLink(input: { accountId: string }) {
@@ -58,12 +76,32 @@ export function setWeeklyWarmupConfig(config: WeeklyWarmupConfig) {
   return ipc.client.cloud.setWeeklyWarmupConfig(config);
 }
 
-export function startAuthFlow(input?: { oauthClientKey?: string }) {
-  return ipc.client.cloud.startAuthFlow(input);
+export function prepareOAuthSession(oauthClientKey?: string) {
+  return ipc.client.cloud.oauthSession.prepare(oauthClientKey ? { oauthClientKey } : {});
 }
 
-export function submitAuthCode(input: { code: string }) {
-  return ipc.client.cloud.submitAuthCode(input);
+export function openOAuthSession(sessionId: string) {
+  return ipc.client.cloud.oauthSession.open({ sessionId });
+}
+
+export function copyOAuthSessionLink(sessionId: string) {
+  return ipc.client.cloud.oauthSession.copy({ sessionId });
+}
+
+export function waitForOAuthSession(sessionId: string) {
+  return ipc.client.cloud.oauthSession.wait({ sessionId });
+}
+
+export function submitOAuthSessionCallback(sessionId: string, code: string) {
+  return ipc.client.cloud.oauthSession.submit({ sessionId, code });
+}
+
+export function cancelOAuthSession(sessionId: string) {
+  return ipc.client.cloud.oauthSession.cancel({ sessionId });
+}
+
+export function importCloudAccountRefreshToken(refreshToken: string, oauthClientKey?: string) {
+  return ipc.client.cloud.credentialImport.importToken({ refreshToken, oauthClientKey });
 }
 
 export function listOAuthClients() {
@@ -132,6 +170,10 @@ export function setAccountProxy(input: { accountId: string; proxyUrl: string | n
     throw new Error('Invalid proxy URL format');
   }
   return ipc.client.cloud.setAccountProxy(input);
+}
+
+export function setAccountRouting(input: SetCloudAccountRoutingInput) {
+  return ipc.client.cloud.setAccountRouting(input);
 }
 
 export function exportCloudAccounts(input: { stripTokens?: boolean }) {

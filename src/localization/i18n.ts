@@ -10,6 +10,10 @@ import fr from './fr';
 import ptBr from './pt-BR';
 import ja from './ja';
 import arEg from './ar-EG';
+import { mergeLocaleCatalog } from './locale-catalog';
+
+import { DESKTOP_LANGUAGES } from '@/modules/app-shell/desktop-appearance';
+import { LOCAL_STORAGE_KEYS } from '@/shared/constants';
 
 i18n
   .use(LanguageDetector)
@@ -18,38 +22,38 @@ i18n
     fallbackLng: 'en',
     detection: {
       order: ['localStorage', 'navigator'],
-      caches: ['localStorage'],
-      lookupLocalStorage: 'lang',
+      caches: [],
+      lookupLocalStorage: LOCAL_STORAGE_KEYS.LANGUAGE,
     },
-    supportedLngs: ['en', 'zh-CN', 'ru', 'vi', 'tr', 'fr', 'pt-BR', 'ja', 'ar-EG'],
+    supportedLngs: [...DESKTOP_LANGUAGES],
     load: 'currentOnly', // Only load the exact language code, not variants
     resources: {
       en: {
         translation: en,
       },
       vi: {
-        translation: vi,
+        translation: mergeLocaleCatalog(en, vi),
       },
       tr: {
-        translation: tr,
+        translation: mergeLocaleCatalog(en, tr),
       },
       'zh-CN': {
-        translation: zhCn,
+        translation: mergeLocaleCatalog(en, zhCn),
       },
       ru: {
-        translation: ru,
+        translation: mergeLocaleCatalog(en, ru),
       },
       fr: {
-        translation: fr,
+        translation: mergeLocaleCatalog(en, fr),
       },
       'pt-BR': {
-        translation: ptBr,
+        translation: mergeLocaleCatalog(en, ptBr),
       },
       ja: {
-        translation: ja,
+        translation: mergeLocaleCatalog(en, ja),
       },
       'ar-EG': {
-        translation: arEg,
+        translation: mergeLocaleCatalog(en, arEg),
       },
     },
   });

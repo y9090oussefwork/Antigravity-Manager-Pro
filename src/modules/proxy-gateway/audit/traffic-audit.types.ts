@@ -1,9 +1,13 @@
 import { z } from 'zod';
+import type { AuditUsage } from './audit-usage';
+import { UpstreamAttemptTimingSchema, type UpstreamAttemptTiming } from './upstream-attempt-timing';
 
 import { TrafficClassSchema, type TrafficClass } from './traffic-classifier';
+import { AuditClientSchema } from './audit-client-identity';
 
 export const AuditOutcomeSchema = z.enum([
   'in_progress',
+  'capture_interrupted',
   'completed',
   'client_cancelled',
   'client_disconnected',
@@ -24,6 +28,8 @@ export interface AuditPayloadFields {
 }
 
 export interface StartAuditParentInput {
+  captureGeneration?: number;
+  startedAt?: number;
   clientIp?: string;
   headers?: Record<string, unknown>;
   method: string;
@@ -40,6 +46,7 @@ export interface StartAuditParentInput {
 }
 
 export interface CompleteAuditParentInput {
+  sessionId?: string;
   error?: unknown;
   /** Already redacted by the owned audit serializer across the private process boundary. */
   errorSummary?: string | null;
@@ -63,6 +70,10 @@ export interface CompleteAuditParentInput {
 
 export interface StartUpstreamAttemptInput {
   accountId?: string;
+  accountGenerationHash?: string;
+  accountSubjectHash?: string;
+  accountGrantHash?: string;
+  usageScope?: 'generation' | 'non-generation';
   endpoint: string;
   headers?: Record<string, unknown>;
   model?: string;
@@ -71,6 +82,8 @@ export interface StartUpstreamAttemptInput {
 }
 
 export interface CompleteUpstreamAttemptInput {
+  timing?: UpstreamAttemptTiming | null;
+  usage?: AuditUsage;
   error?: unknown;
   outcome: AuditOutcome;
   partial?: boolean;
@@ -82,8 +95,12 @@ export interface CompleteUpstreamAttemptInput {
   status?: number;
 }
 
+export const TrafficUsageRequestStateSchema = z.enum(['all', 'retried', 'failed']);
 export const TrafficAuditListInputSchema = z.object({
   accountId: z.string().trim().max(256).optional(),
+  attemptAccountId: z.string().min(1).max(256).optional(),
+  attemptModel: z.string().min(1).max(256).optional(),
+  client: AuditClientSchema.optional(),
   from: z.number().int().nonnegative().optional(),
   limit: z.number().int().min(1).max(200).default(50),
   model: z.string().trim().optional(),
@@ -92,6 +109,7 @@ export const TrafficAuditListInputSchema = z.object({
   offset: z.number().int().nonnegative().default(0),
   protocol: z.string().trim().optional(),
   requestId: z.string().trim().optional(),
+  sessionId: z.string().trim().min(1).max(512).optional(),
   status: z.number().int().min(0).max(599).optional(),
   statusMode: z
     .enum(['all', '1xx', '2xx', '3xx', '4xx', '5xx', 'exact', 'unfinished', 'no-status'])
@@ -99,6 +117,8 @@ export const TrafficAuditListInputSchema = z.object({
   trafficClass: TrafficClassSchema.optional(),
   search: z.string().trim().max(512).optional(),
   to: z.number().int().nonnegative().optional(),
+  usageAsOf: z.number().int().nonnegative().safe().optional(),
+  usageState: TrafficUsageRequestStateSchema.optional(),
 });
 
 export type TrafficAuditListInput = z.infer<typeof TrafficAuditListInputSchema>;
@@ -194,6 +214,7 @@ export const TrafficAuditRequestDetailSchema = z.object({
 });
 
 export const TrafficAuditAttemptDetailSchema = z.object({
+  timing: UpstreamAttemptTimingSchema.nullable().optional(),
   accountId: z.string().nullable(),
   accountIdHash: z.string().nullable(),
   attemptIndex: z.number().int().nonnegative(),
@@ -293,6 +314,7 @@ export const TrafficAuditListResultSchema = z.object({
   items: z.array(TrafficAuditSummarySchema),
   total: z.number().int().nonnegative(),
 });
+export type TrafficAuditListResult = z.infer<typeof TrafficAuditListResultSchema>;
 
 export const TrafficAuditFilterOptionsSchema = z.object({
   accountIds: z.array(z.string()),
@@ -309,6 +331,14 @@ export const TrafficAuditEventSchema = z.object({
 export type TrafficAuditEvent = z.infer<typeof TrafficAuditEventSchema>;
 
 export const TrafficAuditStatsSchema = z.object({
+  archives: z.discriminatedUnion('status', [
+    z.object({
+      status: z.literal('complete'),
+      bytes: z.number().int().nonnegative(),
+      files: z.number().int().nonnegative(),
+    }),
+    z.object({ status: z.literal('unknown') }),
+  ]),
   bodyStoredBytes: z.number().int().nonnegative(),
   databaseBytes: z.number().int().nonnegative(),
   droppedCount: z.number().int().nonnegative(),
@@ -319,6 +349,7 @@ export const TrafficAuditStatsSchema = z.object({
   workerAlive: z.boolean(),
   workerPendingBytes: z.number().int().nonnegative(),
   workerPendingCommands: z.number().int().nonnegative(),
+  maintenanceState: z.enum(['running', 'scheduled', 'idle', 'stopped']).optional(),
 });
 
 export type TrafficAuditStats = z.infer<typeof TrafficAuditStatsSchema>;

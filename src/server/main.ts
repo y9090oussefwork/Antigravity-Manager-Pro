@@ -4,30 +4,37 @@ import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify
 import fastifyMultipart from '@fastify/multipart';
 import { AppModule } from './app.module';
 import { logger } from '../shared/logging/logger';
-import { AccountLeaseService } from '../modules/proxy-gateway/server/modules/account-lease/account-lease.service';
-import { OpenAIOperations } from '../modules/proxy-gateway/server/modules/openai/openai-operations.service';
-import { ProxyService } from '../modules/proxy-gateway/server/proxy.service';
-import { DEFAULT_MAX_FILE_BYTES } from '../modules/proxy-gateway/server/modules/files/file-store.types';
-import { attachOpenAIResponsesWebSocketServer } from '../modules/proxy-gateway/server/modules/openai/responses/openai-responses-websocket.server';
-import { createResponsesWebSocketOperations } from '@/modules/proxy-gateway/server/modules/openai/responses/openai-responses-websocket.operations';
-import {
-  extractApiKeyToken,
-  hasConfiguredApiKey,
-} from '../modules/proxy-gateway/server/guards/api-key-auth.util';
-import { MAX_IMAGE_GENERATION_BODY_BYTES } from '@/modules/proxy-gateway/server/modules/openai/media/image-input-validation';
+import { AccountLeaseService } from './gateway/modules/account-lease/account-lease.service';
+import { GeminiClient } from './gateway/modules/gemini/gemini-client.service';
+import { proxyModelAvailabilityStore } from '@/server/gateway/shared/services/model-availability.service';
+import { OpenAIOperations } from './gateway/modules/openai/openai-operations.service';
+import { ProxyService } from './gateway/proxy.service';
+import { DEFAULT_MAX_FILE_BYTES } from './gateway/modules/files/file-store.types';
+import { attachOpenAIResponsesWebSocketServer } from './gateway/modules/openai/responses/openai-responses-websocket.server';
+import { createResponsesWebSocketOperations } from '@/server/gateway/modules/openai/responses/openai-responses-websocket.operations';
+import { extractApiKeyToken } from './gateway/guards/api-key-auth.util';
+import { hasConfiguredApiKey } from '@/shared/security/api-key';
+import { MAX_IMAGE_GENERATION_BODY_BYTES } from '@/server/gateway/modules/openai/media/image-input-validation';
+import { evaluateClientAddress } from '@/shared/network/client-address';
 import {
   DEFAULT_PROXY_JSON_BODY_LIMIT_BYTES,
   isModelPayloadRoute,
-} from '../modules/proxy-gateway/server/proxy.constants';
+} from './gateway/proxy.constants';
 import { registerTrafficAuditHttpHooks } from '@/modules/proxy-gateway/audit/traffic-audit-context';
+import { ResponsesWebSocketAudit } from '@/modules/proxy-gateway/audit/responses-websocket-audit';
+import { registerGzipJsonIngress } from '@/server/gateway/common/gzip-json-ingress';
+import { registerGeminiQueryCredentialIngress } from '@/server/gateway/guards/gemini-query-credential-ingress';
 import { trafficAuditService } from '@/modules/proxy-gateway/audit/traffic-audit.service';
 import { thoughtStoreService } from '@/modules/proxy-gateway/thought-store/thought-store.service';
 
 import { ProxyConfig } from '@/modules/config/types';
 import { getServerConfig, setServerConfig } from './server-config';
+import { isEqual } from 'lodash-es';
 
 let app: NestFastifyApplication | null = null;
 let currentPort: number = 0;
+let currentListenAddress = '';
+let startupConfig: ProxyConfig | null = null;
 let detachResponsesWebSocketServer: (() => void) | null = null;
 
 export type NestServerStartResult =
@@ -35,6 +42,7 @@ export type NestServerStartResult =
       success: true;
       port: number;
       base_url: string;
+      listen_address?: string;
     }
   | {
       success: false;
@@ -56,6 +64,14 @@ interface RouteLimitHost {
     name: 'onRoute',
     handler: (options: { bodyLimit?: number; method: string | string[]; url: string }) => void,
   ) => void;
+}
+
+function isIpv6UnavailableError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const code = 'code' in error && typeof error.code === 'string' ? error.code : '';
+  return code === 'EAFNOSUPPORT' || code === 'ENOPROTOOPT' || code === 'EPROTONOSUPPORT';
 }
 
 export function registerImageGenerationBodyLimit(instance: RouteLimitHost): void {
@@ -117,24 +133,29 @@ async function cleanupFailedServerStart() {
   } finally {
     app = null;
     currentPort = 0;
+    currentListenAddress = '';
+    startupConfig = null;
   }
 }
 
 export function createFastifyAdapter(): FastifyAdapter {
   const adapter = new FastifyAdapter();
+  registerGeminiQueryCredentialIngress(adapter.getInstance());
   registerImageGenerationBodyLimit(adapter.getInstance());
   registerModelRouteBodyLimits(adapter.getInstance());
+  registerGzipJsonIngress(adapter.getInstance());
   return adapter;
 }
 
 export async function bootstrapNestServer(config: ProxyConfig): Promise<NestServerStartResult> {
   const port = config.port || 8045;
   if (app) {
-    logger.info('NestJS server already running.');
+    logger.shareable('info', 'NestJS server already running.');
     return {
       success: true,
       port: currentPort,
       base_url: `http://localhost:${currentPort}`,
+      listen_address: currentListenAddress || 'unknown',
     };
   }
 
@@ -156,18 +177,59 @@ export async function bootstrapNestServer(config: ProxyConfig): Promise<NestServ
     });
     registerRawMediaBodyParser(fastifyAdapter.getInstance() as RawMediaBodyParserHost);
 
-    const apiKeyConfigured = hasConfiguredApiKey(config.api_key);
-    if (apiKeyConfigured) {
+    if (hasConfiguredApiKey(config.api_key)) {
       app.enableCors();
     }
 
-    const listenHost = apiKeyConfigured ? '0.0.0.0' : '127.0.0.1';
-    await app.listen(port, listenHost);
+    let listenAddress = config.network.lan_access ? '::' : '127.0.0.1';
+    app
+      .getHttpAdapter()
+      .getInstance()
+      .addHook('onRequest', (request, reply, done) => {
+        const decision = evaluateClientAddress(
+          request.socket.remoteAddress ?? request.ip,
+          request.headers,
+          config.network,
+        );
+        if (!decision.allowed) {
+          reply.code(403).send({
+            error: {
+              code: 'ip_address_rejected',
+              message: 'Request source is not allowed',
+              type: 'invalid_request_error',
+            },
+          });
+          return;
+        }
+        done();
+      });
+    if (config.network.lan_access) {
+      try {
+        await app.listen({ port, host: '::', ipv6Only: false });
+      } catch (error) {
+        if (!isIpv6UnavailableError(error)) {
+          throw error;
+        }
+        listenAddress = '0.0.0.0';
+        await app.listen(port, listenAddress);
+      }
+    } else {
+      await app.listen(port, listenAddress);
+    }
     const openAIOperations = app.get(OpenAIOperations);
     const proxyService = app.get(ProxyService);
     detachResponsesWebSocketServer = attachOpenAIResponsesWebSocketServer(app.getHttpServer(), {
+      createAudit: (payload, context) => new ResponsesWebSocketAudit(payload, context),
       ...createResponsesWebSocketOperations(openAIOperations, proxyService),
       isAuthorized: (request) => {
+        const decision = evaluateClientAddress(
+          request.socket.remoteAddress ?? '',
+          request.headers,
+          config.network,
+        );
+        if (!decision.allowed) {
+          return false;
+        }
         const configuredApiKey = getConfiguredApiKey();
         return (
           !hasConfiguredApiKey(configuredApiKey) ||
@@ -176,18 +238,21 @@ export async function bootstrapNestServer(config: ProxyConfig): Promise<NestServ
       },
     });
     currentPort = port;
-    logger.info(`NestJS Proxy Server running on http://localhost:${port}`);
+    currentListenAddress = listenAddress;
+    startupConfig = structuredClone(config);
+    logger.shareable('info', `NestJS Proxy Server running on http://localhost:${port}`);
     return {
       success: true,
       port,
       base_url: `http://localhost:${port}`,
+      listen_address: listenAddress,
     };
   } catch (error) {
     await cleanupFailedServerStart();
 
     if (isAddressInUseError(error)) {
       const message = `Port ${port} is already in use`;
-      logger.warn(`NestJS Proxy Server could not start: ${message}`, error);
+      logger.shareable('warn', `NestJS Proxy Server could not start: ${message} (EADDRINUSE)`);
       return {
         success: false,
         reason: 'address-in-use',
@@ -232,7 +297,9 @@ export async function stopNestServer(): Promise<boolean> {
       }
       app = null;
       currentPort = 0;
-      logger.info('NestJS server stopped.');
+      currentListenAddress = '';
+      startupConfig = null;
+      logger.shareable('info', 'NestJS server stopped.');
       return true;
     } catch (e) {
       logger.error('Failed to stop NestJS server', e);
@@ -246,6 +313,32 @@ export function isNestServerRunning(): boolean {
   return app !== null;
 }
 
+/** Listener hooks and constructor-owned limits keep their startup values until an explicit restart. */
+export function getNestServerRestartFields(config: ProxyConfig): string[] {
+  if (!app || !startupConfig) {
+    return [];
+  }
+  const fields: string[] = [];
+  if (startupConfig.port !== config.port) {
+    fields.push('proxy.port');
+  }
+  for (const key of Object.keys(config.network)) {
+    if (!isEqual(Reflect.get(startupConfig.network, key), Reflect.get(config.network, key))) {
+      fields.push(`proxy.network.${key}`);
+    }
+  }
+  if (
+    startupConfig.image_scheduler.per_account_concurrency !==
+    config.image_scheduler.per_account_concurrency
+  ) {
+    fields.push('proxy.image_scheduler.per_account_concurrency');
+  }
+  if (hasConfiguredApiKey(startupConfig.api_key) !== hasConfiguredApiKey(config.api_key)) {
+    fields.push('proxy.api_key');
+  }
+  return fields;
+}
+
 export async function reloadNestServerAccountLeaseCache(): Promise<boolean> {
   if (!app) {
     return false;
@@ -254,14 +347,6 @@ export async function reloadNestServerAccountLeaseCache(): Promise<boolean> {
   const accountLeaseService = app.get(AccountLeaseService);
   await accountLeaseService.reloadAllAccountsOrThrow();
   return true;
-}
-
-export function evictNestServerAccountLeaseAccount(accountId: string): boolean {
-  if (!app) {
-    return false;
-  }
-
-  return app.get(AccountLeaseService).evictAccount(accountId);
 }
 
 export function quarantineNestServerAccountLeaseAccount(accountId: string): void {
@@ -284,15 +369,66 @@ export function clearNestServerAccountMemoryQuarantine(
   return true;
 }
 
-export function updateNestServerAccountLeaseOAuthHealth(
+export function evictNestServerAccountLeaseAccount(
   accountId: string,
-  oauthHealth: Parameters<AccountLeaseService['updateAccountOAuthHealth']>[1],
+  context?: Parameters<AccountLeaseService['evictAccount']>[1],
 ): boolean {
   if (!app) {
     return false;
   }
 
-  return app.get(AccountLeaseService).updateAccountOAuthHealth(accountId, oauthHealth);
+  return app.get(AccountLeaseService).evictAccount(accountId, context);
+}
+
+export function replaceNestServerAccountLeaseToken(
+  account: Parameters<AccountLeaseService['replaceAccountToken']>[0],
+): void {
+  app?.get(AccountLeaseService).replaceAccountToken(account);
+}
+
+export function updateNestServerAccountRouting(
+  account: Parameters<AccountLeaseService['updateAccountRouting']>[0],
+): void {
+  app?.get(AccountLeaseService).updateAccountRouting(account);
+}
+
+/** The availability store outlives the running gateway and also needs cleanup while stopped. */
+export function forgetDeletedNestServerAccount(accountId: string): void {
+  if (app) {
+    const failures: unknown[] = [];
+    try {
+      app.get(GeminiClient).forgetDeletedAccount(accountId);
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      app.get(AccountLeaseService).forgetDeletedAccount(accountId);
+    } catch (error) {
+      failures.push(error);
+    }
+    if (failures.length === 1) {
+      throw failures[0];
+    }
+    if (failures.length > 1) {
+      throw new AggregateError(failures, 'Deleted account runtime cleanup failed', {
+        cause: failures[0],
+      });
+    }
+  } else {
+    proxyModelAvailabilityStore.clearAccountOrThrow(accountId);
+  }
+}
+
+export function updateNestServerAccountLeaseOAuthHealth(
+  accountId: string,
+  oauthHealth: Parameters<AccountLeaseService['updateAccountOAuthHealth']>[1],
+  context?: Parameters<AccountLeaseService['updateAccountOAuthHealth']>[2],
+): boolean {
+  if (!app) {
+    return false;
+  }
+
+  return app.get(AccountLeaseService).updateAccountOAuthHealth(accountId, oauthHealth, context);
 }
 
 function getConfiguredApiKey(): string | undefined {
@@ -304,6 +440,7 @@ export async function getNestServerStatus(): Promise<{
   port: number;
   base_url: string;
   active_accounts: number;
+  listen_address?: string;
 }> {
   const running = isNestServerRunning();
   let activeAccounts = 0;
@@ -322,5 +459,6 @@ export async function getNestServerStatus(): Promise<{
     port: currentPort,
     base_url: running ? `http://localhost:${currentPort}` : '',
     active_accounts: activeAccounts,
+    listen_address: running ? currentListenAddress : '',
   };
 }

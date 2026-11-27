@@ -17,11 +17,50 @@ import {
 
 type ProfileRow = typeof workspaceProfiles.$inferSelect;
 
+export function normalizeWorkspaceAccountIds(
+  activeAccountId: string,
+  rawAccountIds?: readonly string[] | null,
+): string[] {
+  const normalizedActive = activeAccountId.trim();
+  const result: string[] = [];
+  const seen = new Set<string>();
+  if (rawAccountIds) {
+    for (const id of rawAccountIds) {
+      const trimmed = id.trim();
+      if (trimmed && !seen.has(trimmed)) {
+        seen.add(trimmed);
+        result.push(trimmed);
+      }
+    }
+  }
+  if (normalizedActive && !seen.has(normalizedActive)) {
+    result.unshift(normalizedActive);
+  }
+  return result;
+}
+
+function parseAccountIdsJson(rawJson: string | null | undefined, activeAccountId: string): string[] {
+  if (!rawJson) {
+    return normalizeWorkspaceAccountIds(activeAccountId);
+  }
+  try {
+    const parsed: unknown = JSON.parse(rawJson);
+    if (Array.isArray(parsed) && parsed.every((item) => typeof item === 'string')) {
+      return normalizeWorkspaceAccountIds(activeAccountId, parsed);
+    }
+  } catch {
+    // Fall back to active account when legacy/corrupted JSON is present.
+  }
+  return normalizeWorkspaceAccountIds(activeAccountId);
+}
+
 function mapRowToProfile(row: ProfileRow): WorkspaceProfile {
   return WorkspaceProfileSchema.parse({
     id: row.id,
     name: row.name,
     accountId: row.accountId,
+    accountIds: parseAccountIdsJson(row.accountIdsJson, row.accountId),
+    autoSwitchEnabled: Boolean(row.autoSwitchEnabled),
     projectPath: row.projectPath,
     userDataDir: row.userDataDir,
     createdAt: row.createdAt,
@@ -132,10 +171,16 @@ export class WorkspaceProfileRepo {
       userDataDir = getProfileUserDataDir(id);
     }
 
+    const normalizedAccountId = input.accountId.trim();
+    const normalizedAccountIds = normalizeWorkspaceAccountIds(normalizedAccountId, input.accountIds);
+    const autoSwitchEnabled = Boolean(input.autoSwitchEnabled);
+
     const newProfile: WorkspaceProfile = {
       id,
       name: input.name.trim(),
-      accountId: input.accountId.trim(),
+      accountId: normalizedAccountId,
+      accountIds: normalizedAccountIds,
+      autoSwitchEnabled,
       projectPath: rawProjectPath,
       userDataDir,
       createdAt: Date.now(),
@@ -163,6 +208,8 @@ export class WorkspaceProfileRepo {
             id: newProfile.id,
             name: newProfile.name,
             accountId: newProfile.accountId,
+            accountIdsJson: JSON.stringify(newProfile.accountIds),
+            autoSwitchEnabled: newProfile.autoSwitchEnabled ? 1 : 0,
             projectPath: newProfile.projectPath,
             userDataDir: newProfile.userDataDir,
             createdAt: newProfile.createdAt,
@@ -218,11 +265,28 @@ export class WorkspaceProfileRepo {
       }
 
       const existingProfile = mapRowToProfile(existing);
+      const existingAccountIds = existingProfile.accountIds ?? [existingProfile.accountId];
+      const nextAccountId =
+        input.accountId !== undefined ? input.accountId.trim() : existingProfile.accountId;
+      const nextAccountIds =
+        input.accountIds !== undefined
+          ? normalizeWorkspaceAccountIds(nextAccountId, input.accountIds)
+          : input.accountId !== undefined
+            ? existingAccountIds.length <= 1
+              ? [nextAccountId]
+              : normalizeWorkspaceAccountIds(nextAccountId, existingAccountIds)
+            : existingAccountIds;
+      const nextAutoSwitchEnabled =
+        input.autoSwitchEnabled !== undefined
+          ? input.autoSwitchEnabled
+          : Boolean(existingProfile.autoSwitchEnabled);
+
       const updatedCandidate: WorkspaceProfile = {
         ...existingProfile,
         name: input.name !== undefined ? input.name.trim() : existingProfile.name,
-        accountId:
-          input.accountId !== undefined ? input.accountId.trim() : existingProfile.accountId,
+        accountId: nextAccountId,
+        accountIds: nextAccountIds,
+        autoSwitchEnabled: nextAutoSwitchEnabled,
         projectPath:
           input.projectPath !== undefined ? input.projectPath.trim() : existingProfile.projectPath,
       };
@@ -232,7 +296,13 @@ export class WorkspaceProfileRepo {
 
       const updates: Partial<typeof workspaceProfiles.$inferInsert> = {};
       if (input.name !== undefined) updates.name = input.name.trim();
-      if (input.accountId !== undefined) updates.accountId = input.accountId.trim();
+      if (input.accountId !== undefined) updates.accountId = nextAccountId;
+      if (input.accountIds !== undefined || input.accountId !== undefined) {
+        updates.accountIdsJson = JSON.stringify(nextAccountIds);
+      }
+      if (input.autoSwitchEnabled !== undefined) {
+        updates.autoSwitchEnabled = nextAutoSwitchEnabled ? 1 : 0;
+      }
       if (input.projectPath !== undefined) updates.projectPath = input.projectPath.trim();
 
       if (Object.keys(updates).length > 0) {
@@ -299,28 +369,31 @@ export class WorkspaceProfileRepo {
   }
 
   /**
-   * Finds all profiles bound to a given Google account ID.
+   * Finds all profiles bound to a given Google account ID (either active or in the assigned pool).
    */
   static async getProfilesByAccountId(
     accountId: string,
     options?: { dbPath?: string },
   ): Promise<WorkspaceProfile[]> {
+    const allProfiles = await this.listProfiles(options);
+    return allProfiles.filter(
+      (profile) =>
+        profile.accountId === accountId || Boolean(profile.accountIds?.includes(accountId)),
+    );
+  }
+
+  /**
+   * Returns true if at least one workspace profile has per-project auto-switch enabled.
+   */
+  static hasAnyAutoSwitchEnabled(options?: { dbPath?: string }): boolean {
     const { raw, orm } = this.getDb(options?.dbPath);
     try {
-      const rows = orm
-        .select()
+      const row = orm
+        .select({ id: workspaceProfiles.id })
         .from(workspaceProfiles)
-        .where(eq(workspaceProfiles.accountId, accountId))
-        .all();
-      const validProfiles: WorkspaceProfile[] = [];
-      for (const row of rows) {
-        try {
-          validProfiles.push(mapRowToProfile(row));
-        } catch (error) {
-          logger.warn(`Skipping corrupted workspace profile row (id: ${row.id})`, error);
-        }
-      }
-      return validProfiles;
+        .where(eq(workspaceProfiles.autoSwitchEnabled, 1))
+        .get();
+      return Boolean(row);
     } finally {
       raw.close();
     }

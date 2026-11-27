@@ -3,8 +3,6 @@ import { createTrafficAuditWorkerDispatcher } from '@/modules/proxy-gateway/audi
 import type { TrafficAuditRepository } from '@/modules/proxy-gateway/audit/traffic-audit.repository';
 
 const config = {
-  bodyRetentionHours: 24,
-  summaryRetentionDays: 30,
   maxRows: 1000,
   maxDiskBytes: 1024,
 };
@@ -19,15 +17,55 @@ function fixture() {
       events.push('slice-one');
       yield;
       events.push('slice-two');
-      return { databaseBytes: 512 };
+      return { databaseBytes: 512, moreWorkPending: false };
     }),
+    shouldPruneAfterIpcInsert: vi.fn<TrafficAuditRepository['shouldPruneAfterIpcInsert']>(
+      () => false,
+    ),
+    shouldPruneIpc: vi.fn<TrafficAuditRepository['shouldPruneIpc']>(() => false),
+    pruneIpc: vi.fn<TrafficAuditRepository['pruneIpc']>(),
   };
   const replies: unknown[] = [];
-  const dispatch = createTrafficAuditWorkerDispatcher(repository, (reply) => replies.push(reply));
+  const reportFailure = vi.fn();
+  const dispatch = createTrafficAuditWorkerDispatcher(
+    repository,
+    (reply) => replies.push(reply),
+    reportFailure,
+  );
   return { repository, dispatch, events, replies };
 }
 
 describe('traffic audit worker maintenance ownership', () => {
+  it('passes the per-write disk budget to the physical repository boundary', () => {
+    const { dispatch, repository } = fixture();
+    dispatch(
+      1,
+      {
+        operation: 'drop',
+        payload: {
+          count: 1,
+          droppedBytes: 0,
+          lastSeen: 1,
+          reason: 'controlled',
+          trafficClass: 'model',
+        },
+      },
+      1234,
+    );
+    expect(repository.execute).toHaveBeenCalledWith(
+      {
+        operation: 'drop',
+        payload: {
+          count: 1,
+          droppedBytes: 0,
+          lastSeen: 1,
+          reason: 'controlled',
+          trafficClass: 'model',
+        },
+      },
+      1234,
+    );
+  });
   it('interleaves reads without advancing or restarting another maintenance pass', () => {
     const { dispatch, repository, events, replies } = fixture();
     dispatch(1, { operation: 'maintenance', payload: config });
@@ -42,9 +80,33 @@ describe('traffic audit worker maintenance ownership', () => {
       { id: 1, yielded: true },
       { id: 2, yielded: true },
       { id: 3, result: { rows: 10 } },
-      { id: 1, result: { databaseBytes: 512 } },
+      { id: 1, result: { databaseBytes: 512, moreWorkPending: false } },
       { id: 2, yielded: true },
-      { id: 2, result: { databaseBytes: 512 } },
+      { id: 2, result: { databaseBytes: 512, moreWorkPending: false } },
+    ]);
+  });
+
+  it('drains the application-operation window before applying shared limits', () => {
+    const { dispatch, repository, events, replies } = fixture();
+    repository.shouldPruneIpc.mockReturnValueOnce(true);
+    repository.pruneIpc.mockImplementationOnce(function* () {
+      events.push('prune-one');
+      yield;
+      events.push('prune-two');
+      return false;
+    });
+    dispatch(1, { operation: 'maintenance', payload: config });
+    dispatch(2, { operation: 'stats', payload: null });
+    dispatch(1, { operation: 'maintenance', payload: config });
+    dispatch(1, { operation: 'maintenance', payload: config });
+    dispatch(1, { operation: 'maintenance', payload: config });
+    expect(events).toEqual(['prune-one', 'stats', 'prune-two', 'slice-one', 'slice-two']);
+    expect(replies).toEqual([
+      { id: 1, yielded: true },
+      { id: 2, result: { rows: 10 } },
+      { id: 1, yielded: true },
+      { id: 1, yielded: true },
+      { id: 1, result: { databaseBytes: 512, moreWorkPending: false } },
     ]);
   });
 
@@ -62,7 +124,7 @@ describe('traffic audit worker maintenance ownership', () => {
       { id: 1, yielded: true },
       { id: 1, error: 'reclamation failed' },
       { id: 2, yielded: true },
-      { id: 2, result: { databaseBytes: 512 } },
+      { id: 2, result: { databaseBytes: 512, moreWorkPending: false } },
     ]);
   });
 

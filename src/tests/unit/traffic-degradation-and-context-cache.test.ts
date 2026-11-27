@@ -4,7 +4,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { resolveHttpOutcome } from '@/modules/proxy-gateway/audit/traffic-audit-http-metadata';
-import { buildProxyResponseTimingHeaders } from '@/modules/proxy-gateway/server/common/proxy-response-timing';
+import { buildProxyResponseTimingHeaders } from '@/server/gateway/common/proxy-response-timing';
 import { runWithTrafficAuditRequestContext } from '@/modules/proxy-gateway/audit/traffic-audit-context';
 import { TrafficDetailDialog } from '@/modules/proxy-gateway/traffic-monitor/TrafficDetailDialog';
 import { ProxyConfigSchema } from '@/modules/config/types';
@@ -12,6 +12,7 @@ import { TrafficAuditSummarySchema } from '@/modules/proxy-gateway/audit/traffic
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
+    i18n: { language: 'en' },
     t: (key: string, options?: Record<string, unknown>) => {
       if (key === 'traffic.recovered-badge' && options?.count) {
         return `Recovered (${options.count} attempts)`;

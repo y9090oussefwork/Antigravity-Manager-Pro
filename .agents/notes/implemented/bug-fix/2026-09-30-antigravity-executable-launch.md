@@ -43,10 +43,10 @@ Linux process arguments are read from `/proc` in the added query module because 
 upstream sysinfo dependency removes empty arguments. The original implementation
 remains unchanged. The extension is published independently as
 `@draculabo/sysinfo-process-enhanced`; this repository consumes version `0.1.0`
-instead of maintaining a local Rust package. Caller deadlines and scan coalescing
+instead of maintaining a local native extension. Caller deadlines and scan coalescing
 belong to the library, while the Manager retains metadata validation and application
 selection. Normal production dependency packaging retains the loader and matching
-platform package; AutoUnpackNatives unpacks its binary. The local Rust build and
+platform package; AutoUnpackNatives unpacks its binary. The local native build and
 manual binary-copy hook are removed, avoiding a second source of truth.
 
 - Detach `xdg-open` but retain the OAuth URI: rejected because ordinary start must not emit an auth-success event.

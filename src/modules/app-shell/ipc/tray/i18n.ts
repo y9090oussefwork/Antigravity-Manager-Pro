@@ -1,3 +1,5 @@
+import { normalizeDesktopLanguage, type DesktopLanguage } from '../../desktop-appearance';
+
 export type TrayTexts = {
   current: string;
   quota: string;
@@ -11,7 +13,7 @@ export type TrayTexts = {
 };
 
 const en: TrayTexts = {
-  current: 'Current',
+  current: 'Current Classic Account',
   quota: 'Quota',
   switch_next: 'Switch to Next Account',
   refresh_current: 'Refresh Current Quota',
@@ -23,7 +25,7 @@ const en: TrayTexts = {
 };
 
 const zh: TrayTexts = {
-  current: '当前账号',
+  current: '当前 Classic 账号',
   quota: '当前额度',
   switch_next: '切换到下一个账号',
   refresh_current: '刷新当前额度',
@@ -35,7 +37,7 @@ const zh: TrayTexts = {
 };
 
 const ru: TrayTexts = {
-  current: 'Текущий',
+  current: 'Текущий аккаунт Classic',
   quota: 'Квота',
   switch_next: 'Переключить на следующий аккаунт',
   refresh_current: 'Обновить текущую квоту',
@@ -47,7 +49,7 @@ const ru: TrayTexts = {
 };
 
 const vi: TrayTexts = {
-  current: 'Hiện tại',
+  current: 'Tài khoản Classic hiện tại',
   quota: 'Quota',
   switch_next: 'Chuyển sang tài khoản tiếp theo',
   refresh_current: 'Làm mới quota hiện tại',
@@ -59,7 +61,7 @@ const vi: TrayTexts = {
 };
 
 const fr: TrayTexts = {
-  current: 'Actuel',
+  current: 'Compte Classic actuel',
   quota: 'Quota',
   switch_next: 'Basculer vers le compte suivant',
   refresh_current: 'Actualiser le quota actuel',
@@ -71,7 +73,7 @@ const fr: TrayTexts = {
 };
 
 const ptBR: TrayTexts = {
-  current: 'Atual',
+  current: 'Conta Classic atual',
   quota: 'Cota',
   switch_next: 'Alternar para o Próximo',
   refresh_current: 'Atualizar Cota Atual',
@@ -83,7 +85,7 @@ const ptBR: TrayTexts = {
 };
 
 const tr: TrayTexts = {
-  current: 'Mevcut',
+  current: 'Mevcut Classic Hesabı',
   quota: 'Kota',
   switch_next: 'Sonraki Hesaba Geç',
   refresh_current: 'Mevcut Kotayı Yenile',
@@ -106,27 +108,30 @@ const ar: TrayTexts = {
   forbidden: 'الحساب محظور',
 };
 
-export function getTrayTexts(lang: string = 'en'): TrayTexts {
-  if (lang.startsWith('zh')) {
-    return zh;
-  }
-  if (lang.startsWith('ru')) {
-    return ru;
-  }
-  if (lang.startsWith('vi')) {
-    return vi;
-  }
-  if (lang.startsWith('fr')) {
-    return fr;
-  }
-  if (lang.startsWith('pt')) {
-    return ptBR;
-  }
-  if (lang.startsWith('tr')) {
-    return tr;
-  }
-  if (lang.startsWith('ar')) {
-    return ar;
-  }
-  return en;
+const ja: TrayTexts = {
+  current: '現在の Classic アカウント',
+  quota: '残りの利用枠',
+  switch_next: '次のアカウントに切り替え',
+  refresh_current: '現在の利用枠を更新',
+  show_window: 'メインウィンドウを表示',
+  quit: 'アプリを終了',
+  no_account: 'アカウントなし',
+  unknown_quota: '不明',
+  forbidden: 'アカウントは利用できません',
+};
+
+const trayTexts: Record<DesktopLanguage, TrayTexts> = {
+  en,
+  'zh-CN': zh,
+  ru,
+  vi,
+  fr,
+  'pt-BR': ptBR,
+  tr,
+  ja,
+  'ar-EG': ar,
+};
+
+export function getTrayTexts(lang = 'en'): TrayTexts {
+  return trayTexts[normalizeDesktopLanguage(lang)];
 }

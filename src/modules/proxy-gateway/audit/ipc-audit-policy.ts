@@ -1,9 +1,18 @@
+export function isAccountEnrollmentIpc(path: string): boolean {
+  return (
+    path === 'cloud/submitAuthCode' ||
+    path.startsWith('cloud/oauthSession/') ||
+    path === 'cloud/credentialImport/importToken'
+  );
+}
+
 export function isAuditManagementIpc(path: string): boolean {
   return (
     path === 'proc/getOperation' ||
     path === 'proc/isProcessRunning' ||
     path === 'gateway/status' ||
     path === 'gateway/modelAvailability' ||
+    isAccountEnrollmentIpc(path) ||
     path.startsWith('gateway/audit') ||
     path.startsWith('gateway/thought') ||
     path.startsWith('config/') ||

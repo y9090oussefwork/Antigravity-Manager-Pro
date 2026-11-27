@@ -1,11 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   listCloudAccounts,
-  startAuthFlow,
-  submitAuthCode,
   deleteCloudAccount,
   refreshAccountQuota,
   setAccountProxy,
+  setAccountRouting,
   listOAuthClients,
   setActiveOAuthClient,
 } from '@/modules/cloud-account/actions/cloud';
@@ -24,6 +23,7 @@ import {
 } from '@/modules/cloud-account/actions/cloud';
 import type { WeeklyWarmupConfig } from '@/modules/cloud-account/services/weekly-warmup-contract';
 import { exportCloudAccounts, importCloudAccounts } from '@/modules/cloud-account/actions/cloud';
+import { useWeeklyResetQuotaRefresh } from './use-weekly-reset-quota-refresh';
 
 type SetAccountProxyInput = Parameters<typeof setAccountProxy>[0];
 type SetAccountProxyResult = Awaited<ReturnType<typeof setAccountProxy>>;
@@ -44,21 +44,6 @@ export function useCloudAccounts(refetchInterval: number | false = false) {
   });
 }
 
-export function useStartGoogleAuthFlow() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: startAuthFlow,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.cloudAccounts });
-    },
-  });
-}
-
-export function useSubmitGoogleAuthCode() {
-  return useMutation({ mutationFn: submitAuthCode });
-}
-
 export function useOAuthClients() {
   return useQuery<OAuthClientDescriptor[]>({
     queryKey: QUERY_KEYS.oauthClients,
@@ -71,9 +56,7 @@ export function useSetActiveOAuthClient() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: setActiveOAuthClient,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.oauthClients });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEYS.oauthClients }),
   });
 }
 
@@ -88,10 +71,10 @@ export function useDeleteCloudAccount() {
   });
 }
 
-export function useRefreshQuota() {
+export function useRefreshQuota(accounts?: readonly CloudAccountView[]) {
   const queryClient = useQueryClient();
 
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: refreshAccountQuota,
     onSuccess: (updatedAccount: CloudAccountView) => {
       // Optimistically update
@@ -105,6 +88,8 @@ export function useRefreshQuota() {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.cloudAccounts });
     },
   });
+  useWeeklyResetQuotaRefresh(accounts, queryClient, mutation.mutate, mutation.isPending);
+  return mutation;
 }
 
 export function useSwitchCloudAccount() {
@@ -198,6 +183,16 @@ export function useSetAccountProxy() {
     },
     onError: (error) => {
       console.error('[Mutation] setAccountProxy failed:', error);
+    },
+  });
+}
+
+export function useSetAccountRouting() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: setAccountRouting,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.cloudAccounts });
     },
   });
 }

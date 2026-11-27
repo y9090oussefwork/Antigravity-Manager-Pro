@@ -10,10 +10,13 @@ import {
   Copy,
   Check,
   Shield,
+  Zap,
+  Repeat2,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
@@ -25,6 +28,13 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { AccountTierBadge } from '@/modules/cloud-account/components/AccountTierBadge';
 import { useToast } from '@/components/ui/use-toast';
+import {
+  classifyWorkspaceAccountStatus,
+  filterWorkspaceAccountsByStatus,
+  getWorkspaceAccountMinQuotaPercentage,
+  getWorkspaceAccountStatusCounts,
+  type WorkspaceAccountStatusFilter,
+} from '@/modules/workspace/utils/workspace-account-status';
 import type { WorkspaceProfileView } from '@/modules/workspace/types';
 
 export interface WorkspaceCardProps {
@@ -33,8 +43,12 @@ export interface WorkspaceCardProps {
   onStop: (id: string) => void | Promise<void>;
   onEdit: (workspace: WorkspaceProfileView) => void;
   onDelete: (workspace: WorkspaceProfileView) => void;
+  onSwitchAccount?: (workspaceId: string, accountId: string) => void | Promise<void>;
+  onToggleAutoSwitch?: (workspaceId: string, enabled: boolean) => void | Promise<void>;
   isLaunching?: boolean;
   isStopping?: boolean;
+  isSwitchingAccount?: boolean;
+  switchingAccountId?: string;
   toast?: (options: {
     title: string;
     description?: string;
@@ -48,16 +62,28 @@ export const WorkspaceCard: React.FC<WorkspaceCardProps> = ({
   onStop,
   onEdit,
   onDelete,
+  onSwitchAccount,
+  onToggleAutoSwitch,
   isLaunching = false,
   isStopping = false,
+  isSwitchingAccount = false,
+  switchingAccountId,
   toast: customToast,
 }) => {
   const { t } = useTranslation();
   const { toast: defaultToast } = useToast();
   const toast = customToast ?? defaultToast;
   const [copied, setCopied] = useState(false);
+  const [accountFilter, setAccountFilter] = useState<WorkspaceAccountStatusFilter>('all');
   const isRunning = workspace.status.running;
   const account = workspace.account;
+  const assignedAccounts = workspace.accounts ?? [];
+  const statusCounts = getWorkspaceAccountStatusCounts(assignedAccounts, workspace.accountId);
+  const filteredAssignedAccounts = filterWorkspaceAccountsByStatus(
+    assignedAccounts,
+    workspace.accountId,
+    accountFilter,
+  );
 
   const handleCopyPath = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -188,6 +214,129 @@ export const WorkspaceCard: React.FC<WorkspaceCardProps> = ({
             )}
           </div>
         </div>
+
+        {/* Assigned Account Pool & Per-Project Auto-Switch */}
+        {(assignedAccounts.length > 0 || onToggleAutoSwitch || workspace.autoSwitchEnabled) && (
+          <div className="space-y-2 rounded-lg border p-2.5" data-testid="workspace-account-pool">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
+                {t('workspace-profile.pool-title', {
+                  count: assignedAccounts.length || workspace.accountIds?.length || 1,
+                })}
+              </span>
+              {onToggleAutoSwitch && (
+                <label className="flex cursor-pointer items-center gap-1.5 text-[11px] font-medium">
+                  <Zap
+                    className={`h-3.5 w-3.5 ${
+                      workspace.autoSwitchEnabled ? 'text-primary' : 'text-muted-foreground'
+                    }`}
+                  />
+                  <span>{t('workspace-profile.auto-switch-short')}</span>
+                  <Switch
+                    checked={Boolean(workspace.autoSwitchEnabled)}
+                    onCheckedChange={(checked) => onToggleAutoSwitch(workspace.id, checked)}
+                    aria-label={t('workspace-profile.auto-switch-title')}
+                  />
+                </label>
+              )}
+            </div>
+
+            {assignedAccounts.length > 0 && (
+              <>
+                <div className="flex flex-wrap items-center gap-1">
+                  {(['all', 'available', 'active', 'exhausted'] as const).map((filterKey) => (
+                    <Button
+                      key={filterKey}
+                      type="button"
+                      size="xs"
+                      variant={accountFilter === filterKey ? 'secondary' : 'ghost'}
+                      aria-pressed={accountFilter === filterKey}
+                      onClick={() => setAccountFilter(filterKey)}
+                      className="h-6 gap-1 px-2 text-[10px]"
+                    >
+                      <span>{t(`workspace-profile.pool-filter.${filterKey}`)}</span>
+                      <span className="text-muted-foreground tabular-nums">
+                        {statusCounts[filterKey]}
+                      </span>
+                    </Button>
+                  ))}
+                </div>
+
+                {filteredAssignedAccounts.length === 0 ? (
+                  <div className="text-muted-foreground py-2 text-center text-[11px]">
+                    {t('workspace-profile.pool-empty-filter')}
+                  </div>
+                ) : (
+                  <div className="max-h-36 divide-y overflow-y-auto rounded-md border">
+                    {filteredAssignedAccounts.map((poolAcc) => {
+                      const status = classifyWorkspaceAccountStatus(poolAcc, workspace.accountId);
+                      const isCurrent = status === 'active';
+                      const isSwitchingThis =
+                        isSwitchingAccount && switchingAccountId === poolAcc.id;
+                      const minQuota = getWorkspaceAccountMinQuotaPercentage(poolAcc.quota);
+
+                      return (
+                        <div
+                          key={poolAcc.id}
+                          className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs"
+                        >
+                          <div className="flex min-w-0 flex-1 items-center gap-2">
+                            <span
+                              className={`h-2 w-2 shrink-0 rounded-full ${
+                                status === 'active'
+                                  ? 'bg-primary'
+                                  : status === 'available'
+                                    ? 'bg-success'
+                                    : status === 'exhausted'
+                                      ? 'bg-amber-500'
+                                      : 'bg-destructive'
+                              }`}
+                              aria-hidden="true"
+                            />
+                            <span className="text-foreground truncate text-[11px] font-medium">
+                              {poolAcc.email}
+                            </span>
+                            {minQuota !== null && (
+                              <span className="text-muted-foreground shrink-0 text-[10px] tabular-nums">
+                                {minQuota}%
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="shrink-0">
+                            {isCurrent ? (
+                              <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                                {t('workspace-profile.account-status.active')}
+                              </Badge>
+                            ) : onSwitchAccount ? (
+                              <Button
+                                type="button"
+                                size="xs"
+                                variant="outline"
+                                disabled={isSwitchingAccount}
+                                onClick={() => onSwitchAccount(workspace.id, poolAcc.id)}
+                                className="h-5 gap-1 px-1.5 text-[10px]"
+                              >
+                                <Repeat2 className="h-3 w-3" />
+                                {isSwitchingThis
+                                  ? t('workspace-profile.switching')
+                                  : t('workspace-profile.switch-account')}
+                              </Button>
+                            ) : (
+                              <span className="text-muted-foreground text-[10px]">
+                                {t(`workspace-profile.account-status.${status}`)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         {/* Project Folder Display */}
         <div className="space-y-1">

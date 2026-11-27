@@ -1,20 +1,17 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { getConfiguredModelMapping } from '@/modules/config/model-aliases';
+import { getPublishedModelMapping } from '@/modules/config/model-aliases';
 import { DEFAULT_APP_CONFIG, type ProxyConfig } from '@/modules/config/types';
 import {
   getAllDynamicModels,
   getOpenAICompatibleModels,
 } from '@/modules/proxy-gateway/antigravity/ModelMapping';
-import { ModelRoutingService } from '@/modules/proxy-gateway/server/shared/services/model-routing.service';
+import { ModelRoutingService } from '@/server/gateway/shared/services/model-routing.service';
 import { setServerConfig } from '@/server/server-config';
 
 /**
- * Routing and the two published catalogs used to read the user's aliases from different places:
- * the router merged both legacy maps, while `GET /v1/models` and Gemini's listing read only
- * `custom_mapping`. They now share `getConfiguredModelMapping`, and these cases pin the two
- * answers that share buys -- an alias is advertised exactly when it routes, and a retired one
- * disappears from both at once.
+ * Publication and generation project the same configured routes independently. Existing exact
+ * aliases remain published by default, and legacy maps retain the same routing targets.
  */
 function proxyConfig(overrides: Partial<ProxyConfig>): ProxyConfig {
   return { ...DEFAULT_APP_CONFIG.proxy, ...overrides };
@@ -33,7 +30,7 @@ describe('model catalogs and routing agree about aliases', () => {
     });
     setServerConfig(config);
 
-    const mapping = getConfiguredModelMapping(config);
+    const mapping = getPublishedModelMapping(config);
 
     expect(getOpenAICompatibleModels(mapping, QUOTA_MODELS)).toContain('my-fast');
     expect(getAllDynamicModels(mapping, QUOTA_MODELS)).toContain('my-fast');
@@ -49,7 +46,7 @@ describe('model catalogs and routing agree about aliases', () => {
     });
     setServerConfig(config);
 
-    const mapping = getConfiguredModelMapping(config);
+    const mapping = getPublishedModelMapping(config);
 
     expect(getOpenAICompatibleModels(mapping, QUOTA_MODELS)).not.toContain('my-fast');
     expect(getAllDynamicModels(mapping, QUOTA_MODELS)).not.toContain('my-fast');
@@ -68,12 +65,35 @@ describe('model catalogs and routing agree about aliases', () => {
     });
     setServerConfig(config);
 
-    const mapping = getConfiguredModelMapping(config);
+    const mapping = getPublishedModelMapping(config);
 
     expect(getOpenAICompatibleModels(mapping, QUOTA_MODELS)).toContain('my-claude-alias');
     expect(new ModelRoutingService().resolveModelRoute('my-claude-alias')).toMatchObject({
       resolvedModel: 'gemini-3-pro',
       source: 'configured',
     });
+  });
+
+  it('lists the account catalog without injecting presets or publishing retired targets', () => {
+    const mapping = {
+      'gemini-2.5-flash': 'gemini-3.8-flash-high',
+      'retired-target': 'claude-sonnet-4-5',
+    };
+    const models = [
+      'gemini-3.8-flash-high',
+      'gemini-4-neon-high',
+      'claude-opus-5-5-medium',
+      'claude-sonnet-4-6',
+      'claude-sonnet-4-5',
+      'gemini-4-carbon-disabled',
+    ];
+    expect(getAllDynamicModels(mapping, models)).toEqual([
+      'claude-opus-5-5-medium',
+      'claude-sonnet-4-6',
+      'gemini-2.5-flash',
+      'gemini-3.8-flash-high',
+      'gemini-4-neon-high',
+    ]);
+    expect(getAllDynamicModels({}, ['gemini-2.5-flash'])).toEqual([]);
   });
 });

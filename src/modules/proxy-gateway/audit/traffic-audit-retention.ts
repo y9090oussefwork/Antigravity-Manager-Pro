@@ -1,176 +1,308 @@
-import fs from 'node:fs';
-import Database from 'better-sqlite3';
-import { eq } from 'drizzle-orm';
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type Database from 'better-sqlite3';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  lt,
+  lte,
+  min,
+  notExists,
+  sql,
+} from 'drizzle-orm';
+import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import { sqliteSchema } from '@/shared/persistence/database/sqlite-metadata';
 
-import { auditPayloadChunks, auditPayloads, trafficAuditSchema } from './traffic-audit.schema';
-import type { TrafficClass } from './traffic-classifier';
-import type { TrafficAuditWorkerCommand } from './traffic-audit.worker-protocol';
+import { auditSqliteFilesBytes as sqliteFilesBytes } from './traffic-audit-disk-budget';
+import { auditArchiveUsage } from './traffic-audit-archives';
+import {
+  auditAdminEvents,
+  auditDropStats,
+  auditPayloads,
+  requestLogs,
+  upstreamAttempts,
+} from './traffic-audit.schema';
+import type {
+  TrafficAuditMaintenanceResult,
+  TrafficAuditWorkerCommand,
+} from './traffic-audit.worker-protocol';
 
-type TrafficAuditDatabase = BetterSQLite3Database<typeof trafficAuditSchema>;
 type RetentionConfig = Extract<TrafficAuditWorkerCommand, { operation: 'maintenance' }>['payload'];
-const TRAFFIC_CLASSES: readonly TrafficClass[] = ['system', 'ipc', 'auxiliary', 'model'];
 const DELETE_BATCH_SIZE = 32;
 const VACUUM_PAGE_BATCH = 128;
+const ADMIN_EVENT_LIMIT = 1_000;
+const DROP_BUCKET_LIMIT = 128;
+const IPC_ROW_LIMIT = 50_000;
+const IPC_PRUNE_ROWS = 40_000;
+const requestRowId = sql<number>`${requestLogs}.rowid`;
+
+type ReclaimStatus = 'ready' | 'busy' | 'vacuum_pending';
 
 export class TrafficAuditRetention {
+  private ipcInsertsUntilCheck = 0;
+  private readonly orm: BetterSQLite3Database;
+
   public constructor(
     private readonly databasePath: string,
     private readonly raw: Database.Database,
-    private readonly orm: TrafficAuditDatabase,
-  ) {}
+  ) {
+    this.orm = drizzle(raw);
+  }
 
-  public *maintenance(config: RetentionConfig): Generator<void, { databaseBytes: number }> {
-    const now = Date.now();
-    const bodyCutoff = now - config.bodyRetentionHours * 60 * 60 * 1000;
-    const summaryCutoff = now - config.summaryRetentionDays * 24 * 60 * 60 * 1000;
-    // High-water row IDs bound the pass. Creation-time cutoffs also protect new
-    // writes if a concurrent clear/delete lets SQLite reuse an earlier row ID.
-    const maxRequestRowId = this.maxRowId('request_logs');
-    const maxPayloadRowId = this.maxRowId('audit_payloads');
-    const maxAdminRowId = this.maxRowId('audit_admin_events');
-    yield;
-    const selectExpired = this.raw.prepare<
-      [number, number],
-      { rowId: number; id: string; createdAt: number; state: string }
-    >(
-      'SELECT rowid rowId,id,created_at createdAt,state FROM audit_payloads ' +
-        'WHERE rowid>? AND rowid<=? ORDER BY rowid LIMIT 32',
-    );
-    let payloadRowId = 0;
-    while (payloadRowId < maxPayloadRowId) {
-      const rows = selectExpired.all(payloadRowId, maxPayloadRowId);
-      if (rows.length === 0) {
+  public shouldPruneAfterIpcInsert(): boolean {
+    this.ipcInsertsUntilCheck -= 1;
+    return this.ipcInsertsUntilCheck <= 0 && this.shouldPruneIpc();
+  }
+
+  public *pruneIpc(): Generator<void, boolean> {
+    if (!this.shouldPruneIpc()) {
+      return false;
+    }
+    const startedAt = Date.now();
+    const highWater = this.requestHighWater();
+    let remaining = IPC_PRUNE_ROWS;
+    while (remaining > 0) {
+      const removable = this.ipcRowCount() - (IPC_ROW_LIMIT - IPC_PRUNE_ROWS);
+      const limit = Math.min(remaining, removable, DELETE_BATCH_SIZE);
+      if (limit <= 0) {
         break;
       }
-      for (const row of rows) {
-        payloadRowId = row.rowId;
-        if (row.createdAt < bodyCutoff && row.state !== 'expired') {
-          this.expirePayload(row.id, 'retention');
-          yield;
-        }
-      }
-      yield;
-    }
-    for (const [table, maxRowId] of [
-      ['request_logs', maxRequestRowId],
-      ['audit_admin_events', maxAdminRowId],
-    ] as const) {
-      const removeExpired = this.raw.prepare(
-        `DELETE FROM ${table} WHERE rowid IN (` +
-          `SELECT rowid FROM ${table} WHERE timestamp<? AND rowid<=? ORDER BY timestamp LIMIT ?)`,
-      );
-      while (removeExpired.run(summaryCutoff, maxRowId, DELETE_BATCH_SIZE).changes > 0) {
-        yield;
-      }
-    }
-    this.raw.prepare('DELETE FROM audit_drop_stats WHERE last_seen < ?').run(summaryCutoff);
-    yield;
-    yield* this.evictRowsBeyondLimit(config.maxRows, maxRequestRowId, maxAdminRowId, now);
-    yield* this.reclaimDiskSpace();
-
-    while (sqliteFilesBytes(this.databasePath) > config.maxDiskBytes) {
-      const removedAdmin = this.raw
-        .prepare(
-          'DELETE FROM audit_admin_events WHERE id IN (' +
-            'SELECT id FROM audit_admin_events WHERE rowid<=? AND timestamp<? ORDER BY timestamp ASC LIMIT ?)',
-        )
-        .run(maxAdminRowId, now, DELETE_BATCH_SIZE).changes;
-      if (removedAdmin === 0) {
+      const changes = this.removeOldest(limit, highWater, startedAt, 'ipc');
+      if (changes === 0) {
         break;
       }
+      remaining -= changes;
       yield;
-      yield* this.reclaimDiskSpace();
     }
+    const stillOverLimit = this.shouldPruneIpc();
+    return remaining === 0 && stillOverLimit;
+  }
 
-    // Drive the join from live payloads in index order. Starting from requests would
-    // rescan and sort the whole traffic class for every eviction batch.
-    const selectBodies = this.raw.prepare<
-      [TrafficClass, number, string, number, number],
-      { id: string; createdAt: number; storedBytes: number }
-    >(
-      'SELECT p.id,p.created_at createdAt,p.stored_bytes storedBytes ' +
-        'FROM audit_payloads p INDEXED BY idx_payload_disk_eviction ' +
-        'CROSS JOIN request_logs r ON r.id=p.request_id ' +
-        'WHERE p.stored_bytes>0 AND r.traffic_class=? AND (p.created_at,p.id)>(?,?) ' +
-        'AND p.rowid<=? AND p.created_at<? ' +
-        'ORDER BY p.created_at ASC,p.id ASC LIMIT 32',
+  private ipcRowCount(): number {
+    return (
+      this.orm
+        .select({ value: count() })
+        .from(requestLogs)
+        .where(eq(requestLogs.trafficClass, 'ipc'))
+        .get()?.value ?? 0
     );
+  }
+
+  public shouldPruneIpc(): boolean {
+    // Deletions between checks can only cause an early recount.
+    this.ipcInsertsUntilCheck = IPC_ROW_LIMIT - this.ipcRowCount();
+    return this.ipcInsertsUntilCheck <= 0;
+  }
+
+  private requestHighWater(): number {
+    return (
+      this.orm
+        .select({ value: sql<number>`coalesce(max(${requestRowId}), 0)` })
+        .from(requestLogs)
+        .get()?.value ?? 0
+    );
+  }
+
+  public *maintenance(config: RetentionConfig): Generator<void, TrafficAuditMaintenanceResult> {
+    const startedAt = Date.now();
+    // Both guards are needed: a concurrent clear can reuse row IDs while this pass yields.
+    const highWater = this.requestHighWater();
+    const adminHighWater =
+      this.orm
+        .select({ value: sql<number>`coalesce(max(${auditAdminEvents.id}), 0)` })
+        .from(auditAdminEvents)
+        .get()?.value ?? 0;
+    const diskPressure = sqliteFilesBytes(this.databasePath) > config.maxDiskBytes;
+    yield;
+    yield* this.boundAuxiliaryRecords(startedAt, adminHighWater);
+    yield* this.evictRowsBeyondLimit(config.maxRows, highWater, startedAt);
+    let reclaimStatus = yield* this.reclaimDiskSpace();
+    const target = Math.floor(config.maxDiskBytes * 0.7);
     let databaseBytes = sqliteFilesBytes(this.databasePath);
-    for (const trafficClass of TRAFFIC_CLASSES) {
-      let cursorCreatedAt = Number.MIN_SAFE_INTEGER;
-      let cursorId = '';
-      while (databaseBytes > config.maxDiskBytes) {
-        const bodies = selectBodies.all(
-          trafficClass,
-          cursorCreatedAt,
-          cursorId,
-          maxPayloadRowId,
-          now,
-        );
-        if (bodies.length === 0) {
+    // Reclaim existing free pages first. Once pressure starts, retain headroom for new captures.
+    while (diskPressure && reclaimStatus === 'ready' && databaseBytes > target) {
+      if (this.removeOldest(1, highWater, startedAt) === 0) {
+        break;
+      }
+      const before = databaseBytes;
+      yield;
+      reclaimStatus = yield* this.reclaimDiskSpace();
+      databaseBytes = sqliteFilesBytes(this.databasePath);
+      // Never discard more history merely to gamble that another delete will shrink SQLite.
+      if (databaseBytes >= before) {
+        break;
+      }
+    }
+    if (databaseBytes > config.maxDiskBytes) {
+      console.warn('Traffic audit disk pressure remains; deferring further eviction', {
+        databaseBytes,
+        maxDiskBytes: config.maxDiskBytes,
+        checkpointBusy: reclaimStatus === 'busy',
+        vacuumPending: reclaimStatus === 'vacuum_pending',
+      });
+    }
+    return { databaseBytes, moreWorkPending: reclaimStatus === 'vacuum_pending' };
+  }
+
+  private removeOldest(limit: number, highWater: number, startedAt: number, scope?: 'ipc'): number {
+    const activeAttempts = this.orm
+      .select({ id: upstreamAttempts.id })
+      .from(upstreamAttempts)
+      .where(
+        and(
+          eq(upstreamAttempts.parentId, requestLogs.id),
+          eq(upstreamAttempts.outcome, 'in_progress'),
+          isNull(upstreamAttempts.completedAt),
+        ),
+      );
+    const writingPayloads = this.orm
+      .select({ id: auditPayloads.id })
+      .from(auditPayloads)
+      .where(and(eq(auditPayloads.requestId, requestLogs.id), eq(auditPayloads.state, 'writing')));
+    const rows = this.orm
+      .select({ id: requestLogs.id })
+      .from(requestLogs)
+      .where(
+        and(
+          lte(requestRowId, highWater),
+          lt(requestLogs.timestamp, startedAt),
+          lt(requestLogs.completedAt, startedAt),
+          notExists(activeAttempts),
+          notExists(writingPayloads),
+          scope === 'ipc' ? eq(requestLogs.trafficClass, 'ipc') : undefined,
+        ),
+      )
+      .orderBy(asc(requestLogs.timestamp), asc(requestRowId))
+      .limit(limit)
+      .all();
+    return this.orm.transaction((tx) => {
+      const remove = tx
+        .delete(requestLogs)
+        .where(eq(requestLogs.id, sql.placeholder('id')))
+        .prepare();
+      const began = performance.now();
+      let changes = 0;
+      for (const row of rows) {
+        // FK cascades remove the entire parent, including deduplicated payload references.
+        changes += remove.run({ id: row.id }).changes;
+        if (performance.now() - began >= 20) {
           break;
         }
-        const excessBytes = databaseBytes - config.maxDiskBytes;
-        let expiredBytes = 0;
-        const startedAt = performance.now();
-        this.raw.transaction(() => {
-          for (const row of bodies) {
-            // Chunk/index pages may free more than storedBytes. Reclaim accumulated
-            // deletions before a further body would consume the remaining byte target.
-            if (expiredBytes > 0 && row.storedBytes >= excessBytes - expiredBytes) {
-              break;
-            }
-            this.expirePayload(row.id, 'disk_pressure');
-            cursorCreatedAt = row.createdAt;
-            cursorId = row.id;
-            expiredBytes += row.storedBytes;
-            // One large body may satisfy the budget; do not discard the rest of its page.
-            if (expiredBytes >= excessBytes) {
-              break;
-            }
-            if (performance.now() - startedAt >= 20) {
-              break;
-            }
-          }
-        })();
-        yield;
-        yield* this.reclaimDiskSpace();
-        databaseBytes = sqliteFilesBytes(this.databasePath);
+      }
+      return changes;
+    });
+  }
+
+  private *evictRowsBeyondLimit(
+    maxRows: number,
+    highWater: number,
+    startedAt: number,
+  ): Generator<void> {
+    const countRows = this.orm.select({ value: count() }).from(requestLogs).prepare();
+    const totalChanges = this.orm
+      .select({ value: sql<number>`total_changes()` })
+      .from(sqliteSchema)
+      .limit(1)
+      .prepare();
+    const changeCount = () => totalChanges.get()?.value ?? 0;
+    let remaining = Math.max(0, (countRows.get()?.value ?? 0) - maxRows);
+    while (remaining > 0) {
+      const changes = this.removeOldest(
+        Math.min(remaining, DELETE_BATCH_SIZE),
+        highWater,
+        startedAt,
+      );
+      if (changes === 0) {
+        break;
+      }
+      remaining -= changes;
+      const ownChanges = changeCount();
+      yield;
+      // Concurrent user deletes must reduce the target; reads need no recount.
+      if (changeCount() !== ownChanges) {
+        remaining = Math.max(0, (countRows.get()?.value ?? 0) - maxRows);
       }
     }
+  }
 
-    const removeLogs = this.raw.prepare(
-      'DELETE FROM request_logs WHERE id IN (' +
-        'SELECT id FROM request_logs WHERE traffic_class=? AND rowid<=? AND timestamp<? ORDER BY timestamp ASC LIMIT ?)',
-    );
-    for (const trafficClass of TRAFFIC_CLASSES) {
-      while (sqliteFilesBytes(this.databasePath) > config.maxDiskBytes) {
-        const changes = removeLogs.run(
-          trafficClass,
-          maxRequestRowId,
-          now,
-          DELETE_BATCH_SIZE,
-        ).changes;
+  private *boundAuxiliaryRecords(startedAt: number, adminHighWater: number): Generator<void> {
+    const batchLimit = sql.placeholder('limit');
+    const oldestEvents = this.orm
+      .select({ id: auditAdminEvents.id })
+      .from(auditAdminEvents)
+      .where(
+        and(lt(auditAdminEvents.timestamp, startedAt), lte(auditAdminEvents.id, adminHighWater)),
+      )
+      .orderBy(asc(auditAdminEvents.timestamp), asc(auditAdminEvents.id))
+      .limit(batchLimit);
+    const oldestDrops = this.orm
+      .select({ trafficClass: auditDropStats.trafficClass, reason: auditDropStats.reason })
+      .from(auditDropStats)
+      .where(lt(auditDropStats.lastSeen, startedAt))
+      .orderBy(
+        asc(auditDropStats.lastSeen),
+        asc(auditDropStats.trafficClass),
+        asc(auditDropStats.reason),
+      )
+      .limit(batchLimit);
+    for (const { countRows, remove, limit } of [
+      {
+        countRows: this.orm.select({ value: count() }).from(auditAdminEvents).prepare(),
+        remove: this.orm
+          .delete(auditAdminEvents)
+          .where(inArray(auditAdminEvents.id, oldestEvents))
+          .prepare(),
+        limit: ADMIN_EVENT_LIMIT,
+      },
+      {
+        countRows: this.orm.select({ value: count() }).from(auditDropStats).prepare(),
+        remove: this.orm
+          .delete(auditDropStats)
+          .where(
+            inArray(sql`(${auditDropStats.trafficClass}, ${auditDropStats.reason})`, oldestDrops),
+          )
+          .prepare(),
+        limit: DROP_BUCKET_LIMIT,
+      },
+    ]) {
+      let excess = (countRows.get()?.value ?? 0) - limit;
+      while (excess > 0) {
+        const changes = remove.run({ limit: Math.min(excess, DELETE_BATCH_SIZE) }).changes;
         if (changes === 0) {
           break;
         }
+        excess -= changes;
         yield;
-        yield* this.reclaimDiskSpace();
+        excess = Math.min(excess, (countRows.get()?.value ?? 0) - limit);
       }
     }
-    return { databaseBytes: sqliteFilesBytes(this.databasePath) };
   }
 
   public reclaimDiskSpaceDirect(): void {
-    this.raw.pragma('wal_checkpoint(TRUNCATE)');
-    this.raw.pragma('incremental_vacuum');
-    this.raw.pragma('wal_checkpoint(TRUNCATE)');
+    // Explicit clear reports after reclaiming available pages, but never waits on a pinned reader.
+    const reclaim = this.reclaimDiskSpace();
+    while (!reclaim.next().done) {
+      // The generator has a finite page snapshot and stops on busy/no-progress.
+    }
   }
 
-  private *reclaimDiskSpace(): Generator<void> {
-    // Reclaim before remeasuring: a delete only adds pages to SQLite's freelist.
-    this.raw.pragma('wal_checkpoint(TRUNCATE)');
+  private *reclaimDiskSpace(): Generator<void, ReclaimStatus> {
+    // A pinned reader must not block the weighted worker queue for busy_timeout seconds.
+    const checkpoint = () => {
+      const timeout = Number(this.raw.pragma('busy_timeout', { simple: true }));
+      this.raw.pragma('busy_timeout = 0');
+      try {
+        return this.raw.pragma('wal_checkpoint(TRUNCATE)', { simple: true }) === 0;
+      } finally {
+        this.raw.pragma(`busy_timeout = ${timeout}`);
+      }
+    };
+    if (!checkpoint()) {
+      return 'busy';
+    }
     yield;
     let remainingPages = Number(this.raw.pragma('freelist_count', { simple: true }));
     while (remainingPages > 0) {
@@ -179,127 +311,50 @@ export class TrafficAuditRetention {
         break;
       }
       this.raw.pragma(`incremental_vacuum(${Math.min(remainingPages, VACUUM_PAGE_BATCH)})`);
-      this.raw.pragma('wal_checkpoint(TRUNCATE)');
+      if (!checkpoint()) {
+        return 'busy';
+      }
       const after = Number(this.raw.pragma('freelist_count', { simple: true }));
-      remainingPages -= Math.max(1, before - after);
+      if (after >= before) {
+        return 'vacuum_pending';
+      }
+      remainingPages -= before - after;
       yield;
     }
-  }
-
-  private maxRowId(table: 'request_logs' | 'audit_payloads' | 'audit_admin_events'): number {
-    return (
-      this.raw
-        .prepare<[], { value: number }>(`SELECT COALESCE(MAX(rowid),0) value FROM ${table}`)
-        .get()?.value ?? 0
-    );
-  }
-
-  private *evictRowsBeyondLimit(
-    maxRows: number,
-    maxRequestRowId: number,
-    maxAdminRowId: number,
-    startedAt: number,
-  ): Generator<void> {
-    const countRows = this.raw.prepare<[number, number, number, number], { value: number }>(
-      'SELECT (SELECT COUNT(*) FROM request_logs WHERE rowid<=? AND timestamp<?) + ' +
-        '(SELECT COUNT(*) FROM audit_admin_events WHERE rowid<=? AND timestamp<?) value',
-    );
-    const countRemaining = () =>
-      Math.max(
-        0,
-        (countRows.get(maxRequestRowId, startedAt, maxAdminRowId, startedAt)?.value ?? 0) - maxRows,
-      );
-    const totalChanges = this.raw.prepare<[], { value: number }>('SELECT total_changes() value');
-    const changeCount = () => totalChanges.get()?.value ?? 0;
-    // Reads do not change this connection's counter. Recount only when interleaved
-    // writes could have removed rows, rather than scanning the tables every batch.
-    const remainingAfterYield = (previous: number, ownChanges: number) =>
-      changeCount() === ownChanges ? previous : countRemaining();
-    let remaining = countRemaining();
-    const removeAdmin = this.raw.prepare(
-      'DELETE FROM audit_admin_events WHERE id IN (' +
-        'SELECT id FROM audit_admin_events WHERE rowid<=? AND timestamp<? ORDER BY timestamp ASC LIMIT ?)',
-    );
-    while (remaining > 0) {
-      const changes = removeAdmin.run(
-        maxAdminRowId,
-        startedAt,
-        Math.min(remaining, DELETE_BATCH_SIZE),
-      ).changes;
-      if (changes === 0) {
-        break;
-      }
-      remaining -= changes;
-      const ownChanges = changeCount();
-      yield;
-      remaining = remainingAfterYield(remaining, ownChanges);
-    }
-    const remove = this.raw.prepare(
-      'DELETE FROM request_logs WHERE id IN (' +
-        'SELECT id FROM request_logs WHERE traffic_class=? AND rowid<=? AND timestamp<? ORDER BY timestamp ASC LIMIT ?)',
-    );
-    for (const trafficClass of TRAFFIC_CLASSES) {
-      while (remaining > 0) {
-        const changes = remove.run(
-          trafficClass,
-          maxRequestRowId,
-          startedAt,
-          Math.min(remaining, DELETE_BATCH_SIZE),
-        ).changes;
-        if (changes === 0) {
-          break;
-        }
-        remaining -= changes;
-        const ownChanges = changeCount();
-        yield;
-        remaining = remainingAfterYield(remaining, ownChanges);
-      }
-    }
-  }
-
-  private expirePayload(id: string, reason: string): void {
-    this.raw.transaction(() => {
-      this.orm.delete(auditPayloadChunks).where(eq(auditPayloadChunks.payloadId, id)).run();
-      this.orm
-        .update(auditPayloads)
-        .set({
-          chunkCount: 0,
-          droppedReason: reason,
-          partial: true,
-          state: 'expired',
-          storedBytes: 0,
-        })
-        .where(eq(auditPayloads.id, id))
-        .run();
-    })();
+    return Number(this.raw.pragma('freelist_count', { simple: true })) > 0
+      ? 'vacuum_pending'
+      : 'ready';
   }
 
   public stats() {
-    const row = this.raw
-      .prepare<
-        [],
-        { oldestTimestamp: number | null; rows: number }
-      >('SELECT COUNT(*) rows,MIN(timestamp) oldestTimestamp FROM (' + 'SELECT timestamp FROM request_logs UNION ALL SELECT timestamp FROM audit_admin_events)')
+    const timestamps = this.orm
+      .select({ timestamp: requestLogs.timestamp })
+      .from(requestLogs)
+      .unionAll(this.orm.select({ timestamp: auditAdminEvents.timestamp }).from(auditAdminEvents))
+      .as('timestamps');
+    const row = this.orm
+      .select({ rows: count(), oldestTimestamp: min(timestamps.timestamp) })
+      .from(timestamps)
       .get() ?? { oldestTimestamp: null, rows: 0 };
-    const bodies = this.raw
-      .prepare<
-        [],
-        { bodyStoredBytes: number; incompleteBodies: number | null }
-      >('SELECT COALESCE(SUM(stored_bytes),0) bodyStoredBytes,' + "SUM(CASE WHEN state='incomplete' THEN 1 ELSE 0 END) incompleteBodies FROM audit_payloads")
+    const bodies = this.orm
+      .select({
+        bodyStoredBytes: sql<number>`coalesce(sum(${auditPayloads.storedBytes}), 0)`,
+        incompleteBodies: count(sql`case when ${eq(auditPayloads.state, 'incomplete')} then 1 end`),
+      })
+      .from(auditPayloads)
       .get() ?? { bodyStoredBytes: 0, incompleteBodies: 0 };
-    const drops = this.raw
-      .prepare<
-        [],
-        { droppedCount: number }
-      >('SELECT COALESCE(SUM(count),0) droppedCount FROM audit_drop_stats')
+    const drops = this.orm
+      .select({ droppedCount: sql<number>`coalesce(sum(${auditDropStats.count}), 0)` })
+      .from(auditDropStats)
       .get() ?? { droppedCount: 0 };
-    const last = this.raw
-      .prepare<
-        [],
-        { reason: string }
-      >('SELECT reason FROM audit_drop_stats ORDER BY last_seen DESC LIMIT 1')
+    const last = this.orm
+      .select({ reason: auditDropStats.reason })
+      .from(auditDropStats)
+      .orderBy(desc(auditDropStats.lastSeen))
+      .limit(1)
       .get();
     return {
+      archives: auditArchiveUsage(this.databasePath),
       bodyStoredBytes: bodies.bodyStoredBytes,
       databaseBytes: sqliteFilesBytes(this.databasePath),
       droppedCount: drops.droppedCount,
@@ -309,16 +364,4 @@ export class TrafficAuditRetention {
       rows: row.rows,
     };
   }
-}
-
-function sqliteFilesBytes(databasePath: string): number {
-  let total = 0;
-  for (const suffix of ['', '-wal', '-shm']) {
-    try {
-      total += fs.statSync(`${databasePath}${suffix}`).size;
-    } catch {
-      // Missing WAL/SHM sidecars are expected when the database is idle.
-    }
-  }
-  return total;
 }

@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import Module, { createRequire } from 'node:module';
 import { once } from 'node:events';
+import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import spawn from 'cross-spawn';
 import { Command } from 'commander';
@@ -76,12 +77,19 @@ const environment = {
   ...process.env,
   HOME: home,
   USERPROFILE: home,
-  APPDATA: path.join(home, 'AppData/Roaming'),
-  LOCALAPPDATA: path.join(home, 'AppData/Local'),
+  ANTIGRAVITY_DESKTOP_PREFERENCES_PATH: path.join(home, 'desktop-data', 'desktop-preferences.json'),
 };
+if (process.platform === 'win32') {
+  Object.assign(environment, {
+    APPDATA: path.join(home, 'AppData/Roaming'),
+    LOCALAPPDATA: path.join(home, 'AppData/Local'),
+  });
+}
 delete environment.ELECTRON_RUN_AS_NODE;
 delete environment.NODE_PATH;
-delete environment.NODE_OPTIONS;
+for (const variable of ['NODE_OPTIONS', 'NODE_PATH', 'ELECTRON_RUN_AS_NODE']) {
+  delete environment[variable];
+}
 Object.assign(process.env, environment);
 const require = createRequire(import.meta.url);
 const runtimeRequire = createRequire(path.join(runtime, 'package.json'));
@@ -132,39 +140,51 @@ const cli = path.join(
   runtime.endsWith('standalone') ? 'cli/main.cjs' : 'dist/cli/main.cjs',
 );
 const clients = new Map();
-const desktopPort = process.platform === 'linux' ? 9430 : 9330;
+let desktopPort = process.platform === 'linux' ? 9430 : 9330;
 const classicPort = process.platform === 'linux' ? 9441 : 9341;
 const idePort = process.platform === 'linux' ? 9442 : 9342;
 let desktop;
 let desktopError;
+let desktopExited = false;
 let desktopBrowser;
 let page;
 let credentialRecovery;
 let stage = 'startup';
 
 const command = createCommand(environment);
+const ideSwitchTimeout = process.platform === 'win32' ? 180_000 : undefined;
 
 async function connect(port) {
-  return connectBrowser(port, () => (port === desktopPort ? desktopError : undefined));
+  return connectBrowser(port, () => {
+    if (port !== desktopPort) {
+      return undefined;
+    }
+    return (
+      desktopError ?? (desktopExited ? new Error('Manager Electron exited before CDP') : undefined)
+    );
+  });
 }
 
-async function invoke(name, input) {
-  return withAcceptanceDeadline(() =>
-    page.evaluate(
-      async ({ name, input }) => {
-        const parts = name.split('.');
-        let operation = window.accountAcceptance;
-        for (const part of parts) {
-          operation = operation[part];
-        }
-        return operation(input);
-      },
-      { name, input },
-    ),
+async function invoke(name, input, timeout) {
+  return withAcceptanceDeadline(
+    () =>
+      page.evaluate(
+        async ({ name, input }) => {
+          const parts = name.split('.');
+          let operation = window.accountAcceptance;
+          for (const part of parts) {
+            operation = operation[part];
+          }
+          return operation(input);
+        },
+        { name, input },
+      ),
+    timeout,
   );
 }
 
 async function switchAccount(id, target, source = 'cloud') {
+  const timeout = target === 'ide' ? ideSwitchTimeout : undefined;
   const before =
     options.keepClientRunning && target !== 'agy'
       ? await library.prepareLaunchContext(target)
@@ -173,12 +193,17 @@ async function switchAccount(id, target, source = 'cloud') {
     await closeTarget(target);
   }
   if (options.owner === 'cli') {
-    await command(node, [cli, 'account', 'switch', id, '--target', target, '--source', source]);
+    await command(
+      node,
+      [cli, 'account', 'switch', id, '--target', target, '--source', source],
+      timeout,
+    );
   } else {
-    await invoke(source === 'cloud' ? 'cloud.switchCloudAccount' : 'account.switchAccount', {
-      accountId: id,
-      appTarget: target,
-    });
+    await invoke(
+      source === 'cloud' ? 'cloud.switchCloudAccount' : 'account.switchAccount',
+      { accountId: id, appTarget: target },
+      timeout,
+    );
   }
   if (before) {
     const after = await library.prepareLaunchContext(target);
@@ -332,8 +357,23 @@ try {
     credentialRecovery = captureWindowsCredential(nativeRequire, 'gemini:antigravity');
   }
   if (options.owner === 'cli') {
+    stage = 'manager-cli-start';
     await command(node, [cli, 'service', 'start']);
   } else {
+    if (!options.attachElectron) {
+      stage = 'manager-electron-debug-port';
+      const reservation = createServer();
+      await new Promise((resolve, reject) => {
+        reservation.once('error', reject);
+        reservation.listen(0, '127.0.0.1', resolve);
+      });
+      const address = reservation.address();
+      assert(address && typeof address === 'object');
+      desktopPort = address.port;
+      await new Promise((resolve, reject) => {
+        reservation.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
     const args = [
       ...(options.electronApp ? [path.resolve(options.electronApp)] : []),
       `--user-data-dir=${path.join(home, 'desktop-data')}`,
@@ -342,6 +382,7 @@ try {
       ...(process.platform === 'linux' ? ['--no-sandbox'] : []),
     ];
     if (!options.attachElectron) {
+      stage = 'manager-electron-launch';
       const executable = path.resolve(options.electronBin);
       desktop = spawn(executable, args, {
         cwd: path.dirname(executable),
@@ -352,9 +393,14 @@ try {
       desktop.on('error', (error) => {
         desktopError = error;
       });
+      desktop.once('exit', () => {
+        desktopExited = true;
+      });
       await once(desktop, 'spawn');
     }
+    stage = 'manager-electron-debugger';
     desktopBrowser = await connect(desktopPort);
+    stage = 'manager-electron-page';
     const deadline = Date.now() + 30000;
     while (Date.now() < deadline) {
       page = desktopBrowser
@@ -370,7 +416,9 @@ try {
       await delay(500);
     }
     assert(page, 'Manager renderer did not open');
+    stage = 'manager-electron-main';
     await page.getByRole('main').waitFor({ timeout: 30000 });
+    stage = 'manager-electron-fixture';
     await page.evaluate(await fs.readFile(path.join(helperDirectory, 'renderer.js'), 'utf8'));
   }
   for (const target of options.target ? [options.target] : ['agy', 'classic', 'ide']) {
@@ -509,7 +557,12 @@ try {
     }
   }
 } catch (error) {
-  report.failure = { stage, errorKind: error.name, errorCode: error.code ?? null };
+  report.failure = {
+    stage,
+    errorKind: error.name,
+    errorCode: error.code ?? null,
+    failureCategories: error.failureCategories,
+  };
 } finally {
   if (options.owner === 'cli') {
     await command(node, [cli, 'service', 'stop']).then(
@@ -521,7 +574,9 @@ try {
       },
     );
   }
-  for (const port of [classicPort, idePort]) {
+  for (const port of (options.target ? [options.target] : ['classic', 'ide']).flatMap((target) =>
+    target === 'classic' ? [classicPort] : target === 'ide' ? [idePort] : [],
+  )) {
     try {
       const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 1000 });
       await browser

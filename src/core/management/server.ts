@@ -16,6 +16,7 @@ import { MANAGEMENT_PROTOCOL_VERSION, type ManagementResponse } from './protocol
 import { GoogleLoginOperation } from '@/modules/cloud-account/services/google-login-operation';
 import { classifyOperationCause } from '@/modules/cloud-account/services/operation-cause';
 import { UPSTREAM_PROXY_CONFIGURATION_MESSAGE } from '@/modules/config/upstream-proxy.schema';
+import { InvalidManualOAuthInputError } from '@/modules/cloud-account/services/manual-oauth-input';
 import {
   OAuthStartRequestSchema,
   OAuthCompleteRequestSchema,
@@ -88,7 +89,7 @@ export class ManagementServer {
     );
     server.post('/v1/shutdown', async (_request, reply): Promise<void> => {
       reply.raw.once('finish', () => {
-        void this.options.shutdown().catch(this.options.onShutdownError);
+        this.options.shutdown().catch(this.options.onShutdownError);
       });
       const response: ManagementResponse = {
         version: MANAGEMENT_PROTOCOL_VERSION,
@@ -211,7 +212,22 @@ export class ManagementServer {
             };
             return reply.code(400).send(response);
           }
-          if (!oauth.completeCode(request.params.sessionId, input.data.code)) {
+          let accepted: boolean;
+          try {
+            accepted = oauth.completeCode(request.params.sessionId, input.data.code);
+          } catch (error) {
+            if (!(error instanceof InvalidManualOAuthInputError)) {
+              throw error;
+            }
+            const response: OAuthErrorResponse = {
+              version: MANAGEMENT_PROTOCOL_VERSION,
+              ok: false,
+              code: 'INVALID_REQUEST',
+              message: 'Invalid OAuth completion request',
+            };
+            return reply.code(400).send(response);
+          }
+          if (!accepted) {
             const response: OAuthErrorResponse = {
               version: MANAGEMENT_PROTOCOL_VERSION,
               ok: false,

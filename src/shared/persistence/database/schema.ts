@@ -17,6 +17,12 @@ export const accounts = sqliteTable('accounts', {
   statusReason: text('status_reason'),
   isActive: integer('is_active').notNull().default(0),
   proxyUrl: text('proxy_url'),
+  proxyPriority: integer('proxy_priority').notNull().default(50),
+  proxyGeminiPriority: integer('proxy_gemini_priority'),
+  proxyClaudePriority: integer('proxy_claude_priority'),
+  proxyEnabled: integer('proxy_enabled').notNull().default(1),
+  lifecycleGeneration: text('lifecycle_generation'),
+  googleUsageIdentityJson: text('google_usage_identity_json'),
 });
 
 export const settings = sqliteTable('settings', {
@@ -33,6 +39,8 @@ export const workspaceProfiles = sqliteTable('workspace_profiles', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   accountId: text('account_id').notNull(),
+  accountIdsJson: text('account_ids_json'),
+  autoSwitchEnabled: integer('auto_switch_enabled').notNull().default(0),
   projectPath: text('project_path').notNull(),
   userDataDir: text('user_data_dir').notNull(),
   createdAt: integer('created_at').notNull(),

@@ -8,6 +8,7 @@ import type { TrafficAuditEvent } from '@/modules/proxy-gateway/audit/traffic-au
 const mocks = vi.hoisted(() => ({ tableRender: vi.fn() }));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
+    i18n: { language: 'en' },
     t: (key: string, options?: { count: number }) => (options ? `${key}:${options.count}` : key),
   }),
 }));
@@ -15,8 +16,14 @@ vi.mock('@/ipc/manager', () => ({
   ipc: {
     client: {
       gateway: {
+        auditUsageActivity: async () => [],
         auditList: async () => ({ items: [], total: 100 }),
-        auditStats: async () => ({ rows: 100, databaseBytes: 1000, droppedCount: 0 }),
+        auditStats: async () => ({
+          rows: 100,
+          databaseBytes: 1000,
+          archives: { status: 'complete' as const, bytes: 0, files: 0 },
+          droppedCount: 0,
+        }),
         auditFilterOptions: async () => ({ accountIds: [], modelFamilies: [] }),
       },
     },
@@ -76,6 +83,7 @@ it('isolates search, statistics and queued events while preserving submit and ta
     client.setQueryData(['gateway', 'audit-stats'], {
       rows: 101,
       databaseBytes: 1000,
+      archives: { status: 'complete' as const, bytes: 0, files: 0 },
       droppedCount: 0,
     }),
   );

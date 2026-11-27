@@ -67,6 +67,10 @@ export const WorkspacesView: React.FC<WorkspacesViewProps> = ({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingWorkspace, setEditingWorkspace] = useState<WorkspaceProfileView | null>(null);
   const [deletingWorkspace, setDeletingWorkspace] = useState<WorkspaceProfileView | null>(null);
+  const [switchingState, setSwitchingState] = useState<{
+    workspaceId: string;
+    accountId: string;
+  } | null>(null);
 
   // Filter workspaces by search term
   const filteredWorkspaces = useMemo(() => {
@@ -76,7 +80,8 @@ export const WorkspacesView: React.FC<WorkspacesViewProps> = ({
       (ws) =>
         ws.name.toLowerCase().includes(q) ||
         ws.projectPath.toLowerCase().includes(q) ||
-        (ws.account?.email && ws.account.email.toLowerCase().includes(q)),
+        (ws.account?.email && ws.account.email.toLowerCase().includes(q)) ||
+        ws.accounts?.some((acc) => acc.email.toLowerCase().includes(q)),
     );
   }, [workspaces, searchQuery]);
 
@@ -154,6 +159,43 @@ export const WorkspacesView: React.FC<WorkspacesViewProps> = ({
         variant: 'destructive',
       });
       throw err;
+    }
+  };
+
+  const handleSwitchAccount = async (workspaceId: string, accountId: string) => {
+    setSwitchingState({ workspaceId, accountId });
+    try {
+      await updateMutation.mutateAsync({ id: workspaceId, accountId });
+      toast({ title: t('workspace-profile.account-switched'), variant: 'success' });
+    } catch (err) {
+      toast({
+        title: t('workspace-profile.account-switch-failed'),
+        description:
+          err instanceof Error
+            ? err.message
+            : t('workspace-profile.failed-to-save-workspace-profile'),
+        variant: 'destructive',
+      });
+    } finally {
+      setSwitchingState(null);
+    }
+  };
+
+  const handleToggleAutoSwitch = async (workspaceId: string, enabled: boolean) => {
+    try {
+      await updateMutation.mutateAsync({ id: workspaceId, autoSwitchEnabled: enabled });
+      toast({
+        title: enabled
+          ? t('workspace-profile.auto-switch-enabled')
+          : t('workspace-profile.auto-switch-disabled'),
+        variant: 'success',
+      });
+    } catch (err) {
+      toast({
+        title: t('workspace-profile.failed-to-save-workspace-profile'),
+        description: err instanceof Error ? err.message : undefined,
+        variant: 'destructive',
+      });
     }
   };
 
@@ -269,8 +311,14 @@ export const WorkspacesView: React.FC<WorkspacesViewProps> = ({
               onStop={handleStop}
               onEdit={handleOpenEdit}
               onDelete={setDeletingWorkspace}
+              onSwitchAccount={handleSwitchAccount}
+              onToggleAutoSwitch={handleToggleAutoSwitch}
               isLaunching={launchMutation.isPending && launchMutation.variables === ws.id}
               isStopping={stopMutation.isPending && stopMutation.variables === ws.id}
+              isSwitchingAccount={switchingState?.workspaceId === ws.id}
+              switchingAccountId={
+                switchingState?.workspaceId === ws.id ? switchingState.accountId : undefined
+              }
             />
           ))}
         </div>

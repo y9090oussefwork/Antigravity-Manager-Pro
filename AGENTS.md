@@ -27,7 +27,7 @@ Instructions in a deeper `AGENTS.md` supplement this file for that subtree. Keep
 - Cross-feature primitives belong in `src/shared`; generic UI belongs in `src/components`. Require a real second consumer before moving feature code into shared infrastructure.
 - Renderer code must not import main-process, filesystem, database, keyring or server implementation modules. Cross-process operations go through the typed preload/IPC/ORPC surface.
 - Feature modules own their IPC schemas, routers and handlers. `src/ipc/router.ts` composes them and applies global transport behavior; do not put feature business logic there.
-- NestJS proxy behavior belongs under `src/modules/proxy-gateway/server`; `src/server` owns bootstrap and process lifecycle only.
+- NestJS proxy implementation lives under `src/server/gateway` and follows the [proxy gateway instructions](src/modules/proxy-gateway/AGENTS.md). Keep gateway bootstrap and process lifecycle in `src/server/main.ts`.
 - Shared database primitives live under `src/shared/persistence/database`; feature repositories and codecs remain in the owning feature.
 - Routes live in `src/routes`. Never edit generated `src/routeTree.gen.ts` manually.
 - Do not create reverse dependencies from `src/shared` to feature modules or deep-import another feature's private implementation.
@@ -48,6 +48,7 @@ See [src/modules/AGENTS.md](src/modules/AGENTS.md), [src/modules/proxy-gateway/A
 - Inspect the owning code and nearby tests before editing. Preserve existing naming, structure and error semantics.
 - Make the smallest complete change. Do not add dependencies, abstractions, compatibility paths or defensive states without a current owner and demonstrated need.
 - Always use braces for control flow. Keep `return`, `throw` and similar statements on their own lines.
+- Do not prefix function or method calls with the `void` operator. Use a call statement or a block-bodied callback to discard the result, and preserve Promise rejection handling.
 - Comments and JSDoc explain non-obvious contracts, invariants, trade-offs and safe use. Do not restate visible control flow or keep changelog commentary in source.
 - For failure, recovery, cancellation or background-task changes, follow [failure ownership](docs/error-handling.md) to define partial effects, safe continuation and final reporting.
 - Prefer Radix primitives and Tailwind utilities for UI. Put user-visible strings in `react-i18next` resources using kebab-case keys.
@@ -57,7 +58,7 @@ See [src/modules/AGENTS.md](src/modules/AGENTS.md), [src/modules/proxy-gateway/A
 
 - Never commit secrets, real credentials, authorization headers, private account data or environment files.
 - Cloud-account OAuth tokens are intentionally stored as plaintext JSON in the user's local SQLite profile; see [docs/security.md](docs/security.md) for the backup and access policy. Keep other credentials in their existing OS keyring or encrypted-storage helpers. Do not write secrets to logs, IPC payloads, test fixtures or diagnostic snapshots.
-- Use prepared SQL or Drizzle query construction. Validate data read from SQLite before trusted use.
+- Use the Drizzle query builder for SQLite reads and writes. Follow the [persistence instructions](src/shared/persistence/AGENTS.md#database-safety) for SQLite-specific expressions and driver operations. Validate data read from SQLite before trusted use.
 - Treat preload exposure, IPC, authentication, credential storage, database formats, updates, installers, binary patching and process execution as high-risk surfaces.
 - Do not change database schemas, durable formats, credential location, authentication, release or deployment behavior without explicit task scope and corresponding migration/recovery evidence.
 

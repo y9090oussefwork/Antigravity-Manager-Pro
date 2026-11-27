@@ -13,11 +13,36 @@ import { subscribeSelectedAuditEvents } from '@/modules/proxy-gateway/ipc/audit-
 import { toPublicORPCError } from '@/ipc/router';
 import type { TrafficAuditEvent } from '@/modules/proxy-gateway/audit/traffic-audit.types';
 import type { TrafficAuditService } from '@/modules/proxy-gateway/audit/traffic-audit.service';
+import type { UsageRangeResult } from '@/modules/proxy-gateway/audit/usage-range.schema';
+import type {
+  UsageTrendsInput,
+  UsageTrendsResult,
+} from '@/modules/proxy-gateway/audit/usage-trends.schema';
+import { mockCoreGatewayLifecycle } from '../support/core-gateway-lifecycle';
 
 const id = randomUUID();
+const usageInput = { accountId: 'account-one', modelIds: ['claude-sonnet'], from: 1000, to: 2000 };
+const usageResult: UsageRangeResult = {
+  ...usageInput,
+  asOf: 1800,
+  coverage: 'retained-local-records',
+  accountIdentity: 'current-account-incarnation',
+  timeBasis: 'attempt-start',
+  ambiguousTimeBasis: 'attempt-start-or-unattributed-request-start',
+  recordedRequests: 1,
+  countedRequests: 1,
+  ambiguousRequests: 0,
+  missingUsageRequests: 0,
+  missingCachedRequests: 0,
+  inputTokens: 100,
+  outputTokens: 20,
+  cachedTokens: 60,
+  totalTokens: 120,
+};
 const stats = {
   bodyStoredBytes: 123,
   databaseBytes: 456,
+  archives: { status: 'complete' as const, bytes: 0, files: 0 },
   droppedCount: 0,
   incompleteBodies: 0,
   lastDropReason: null,
@@ -36,6 +61,11 @@ let stopPresentation: (() => void) | undefined;
 const source = {
   list: vi.fn(async () => ({ items: [], total: 0 })),
   filterOptions: vi.fn(async () => ({ accountIds: ['account-one'], modelFamilies: ['gemini'] })),
+  usageRange: vi.fn(async () => usageResult),
+  usageTrends: vi.fn<TrafficAuditService['usageTrends']>(),
+  usageActivity: vi.fn<TrafficAuditService['usageActivity']>(),
+  usageOverview: vi.fn<TrafficAuditService['usageOverview']>(),
+  sessionOptions: vi.fn<TrafficAuditService['sessionOptions']>(),
   detail: vi.fn(async () => null),
   bodyPage: vi.fn<TrafficAuditService['bodyPage']>(async () => null),
   bodySearch: vi.fn(async () => ({ matches: [], truncated: false })),
@@ -86,7 +116,7 @@ async function remote() {
     shutdown: async () => {},
     onShutdownError: vi.fn(),
     rpc: {
-      ...createCoreRpcOperations({ startGateway: vi.fn(), stopGateway: vi.fn() }),
+      ...createCoreRpcOperations(mockCoreGatewayLifecycle()),
       audit: owner,
     },
   });
@@ -97,6 +127,161 @@ async function remote() {
 }
 
 describe('selected audit owner', () => {
+  it('returns bounded session titles and the next cursor through the standalone owner', async () => {
+    const input = { kind: 'search' as const, from: 1, text: 'Desktop' };
+    const result = {
+      rows: [{ sessionId: 'stored-session', title: 'Desktop layout', lastSeen: 1500 }],
+      next: { sessionId: 'last-session', lastSeen: 1200, through: 1600 },
+    };
+    source.sessionOptions.mockResolvedValue(result);
+    expect(await owner.sessionOptions(input)).toEqual(result);
+    await remote();
+    expect(await getAuditAdapter().sessionOptions(input)).toEqual(result);
+    expect(source.sessionOptions.mock.calls).toEqual([[input], [input]]);
+  });
+
+  it('returns overview data and keeps exact drill-down filters through the standalone owner', async () => {
+    const input = {
+      from: 1,
+      to: 3600000,
+      accountId: 'account-one',
+      prices: [{ model: 'physical-model', inputPerMillion: 2, outputPerMillion: 3 }],
+    };
+    const totals = {
+      requests: 1, attempts: 2, retriedRequests: 1, failedRequests: 0, incompleteRequests: 1,
+      inputTokens: 20, peakInputTokens: 20, outputTokens: 10, cacheReadTokens: 0, cacheInputTokens: 0,
+      cacheMeasuredAttempts: 0, reasoningTokens: 0, reasoningMeasuredAttempts: 0,
+      estimatedCostUsd: 0.00007, pricedAttempts: 1,
+    };
+    const emptyGroup = { rows: [], truncated: false };
+    const result = {
+      from: input.from, to: input.to, bucketMs: 3600000 as const, totals, buckets: [],
+      accounts: emptyGroup, models: emptyGroup, sessions: emptyGroup,
+    };
+    source.usageOverview.mockResolvedValue(result);
+    expect(await owner.usageOverview(input)).toEqual(result);
+    await remote();
+    expect(await getAuditAdapter().usageOverview(input)).toEqual(result);
+    expect(source.usageOverview.mock.calls).toEqual([[input], [input]]);
+    const drilldown = {
+      limit: 20, offset: 0, attemptAccountId: 'account-one', attemptModel: 'physical-model',
+      usageAsOf: input.to, usageState: 'retried' as const,
+    };
+    expect(await getAuditAdapter().list(drilldown)).toEqual({ items: [], total: 0 });
+    expect(source.list).toHaveBeenLastCalledWith(drilldown);
+  });
+
+  it('returns the requested activity window through embedded and standalone owners', async () => {
+    const input: UsageTrendsInput = {
+      window: '1h',
+      modelView: 'actual',
+      accountId: 'account-one',
+      model: 'gemini',
+      includeActivity: true,
+    };
+    const metrics = {
+      requests: 0,
+      attempts: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      incompleteRequests: 0,
+    };
+    const result: UsageTrendsResult = {
+      window: '1h',
+      modelView: 'actual',
+      from: 0,
+      to: 3600000,
+      bucketMs: 60000,
+      coverage: 'retained-local-records',
+      totals: metrics,
+      buckets: [],
+      modelFamilies: [{
+        family: 'claude-sonnet-4-6',
+        ...metrics,
+        variants: [{ model: 'claude-sonnet-4-6-thinking', ...metrics }],
+        variantsTruncated: false,
+      }],
+      modelFamiliesTruncated: false,
+      activity: Array.from({ length: 365 }, (_, index) => ({
+        date: new Date(Date.UTC(2025, 0, 6 + index)).toISOString().slice(0, 10),
+        requests: index === 0 ? 1 : 0,
+        attempts: index === 0 ? 1 : 0,
+        observedTokens: index === 0 ? 120 : null,
+        incompleteRequests: 0,
+        estimatedCostUsd: index === 0 ? 0.001 : null,
+        pricedAttempts: index === 0 ? 1 : 0,
+      })),
+    };
+    source.usageTrends.mockResolvedValue(result);
+    expect(await owner.usageTrends(input)).toEqual(result);
+    await remote();
+    expect(await getAuditAdapter().usageTrends(input)).toEqual(result);
+    expect(source.usageTrends.mock.calls).toEqual([[input], [input]]);
+    const activityInput = { filters: { accountId: 'account-one', search: 'synthetic' } };
+    source.usageActivity.mockResolvedValue(result.activity ?? []);
+    expect(await owner.usageActivity(activityInput)).toEqual(result.activity);
+    expect(await getAuditAdapter().usageActivity(activityInput)).toEqual(result.activity);
+    expect(source.usageActivity.mock.calls).toEqual([[activityInput], [activityInput]]);
+  });
+
+  it('carries the entire saved-session filter through embedded and standalone owners', async () => {
+    const input = {
+      limit: 50,
+      offset: 0,
+      sessionId: 'tenant-one:session_%',
+      trafficClass: 'model' as const,
+    };
+    expect(await owner.list(input)).toEqual({ items: [], total: 0 });
+    expect(source.list).toHaveBeenLastCalledWith(input);
+    await remote();
+    expect(await getAuditAdapter().list(input)).toEqual({ items: [], total: 0 });
+    expect(source.list).toHaveBeenLastCalledWith(input);
+  });
+  it('projects usage-query desktop failures through the audit-specific public error contract', () => {
+    const projected = toPublicORPCError(
+      new Error('synthetic private usage failure'),
+      '["gateway","auditUsageRange"]',
+    );
+    expect(projected.message).toBe('Request history is unavailable right now. Please try again.');
+    expect(projected.data).toEqual({
+      auditCode: 'operation-failed',
+      backendCode: 'SERVICE_UNAVAILABLE',
+      backendStatus: 503,
+      backendName: 'ORPCError',
+      backendMessage: 'Request history is unavailable right now. Please try again.',
+      requestPath: '["gateway","auditUsageRange"]',
+    });
+  });
+  it('routes bounded usage reads through either owner without using the embedded store remotely', async () => {
+    expect(await owner.usageRange(usageInput)).toEqual(usageResult);
+    await remote();
+    const embedded = vi.spyOn(auditOwner, 'usageRange');
+    expect(await getAuditAdapter().usageRange(usageInput)).toEqual(usageResult);
+    expect(source.usageRange).toHaveBeenCalledWith(usageInput);
+    expect(embedded).not.toHaveBeenCalled();
+    await server?.close();
+    server = undefined;
+    await expect(getAuditAdapter().usageRange(usageInput)).rejects.toThrow(
+      'Request history is unavailable right now',
+    );
+    expect(embedded).not.toHaveBeenCalled();
+  });
+  it('rejects malformed range inputs, failed reads and inconsistent results without returning zero usage', async () => {
+    const client = await remote();
+    await expect(client.audit.usageRange({ ...usageInput, modelIds: [] })).rejects.toThrow(
+      'Request history is unavailable right now',
+    );
+    expect(source.usageRange).not.toHaveBeenCalled();
+    source.usageRange.mockRejectedValueOnce(new Error('synthetic private database failure'));
+    await expect(client.audit.usageRange(usageInput)).rejects.toThrow(
+      'Request history is unavailable right now',
+    );
+    source.usageRange.mockResolvedValueOnce({ ...usageResult, totalTokens: 999 });
+    await expect(client.audit.usageRange(usageInput)).rejects.toThrow(
+      'Request history is unavailable right now',
+    );
+  });
   it('preserves persisted administrative IDs for detail and deletion', async () => {
     const client = await remote();
     expect(await client.audit.detail({ id: 'admin:42' })).toBeNull();
