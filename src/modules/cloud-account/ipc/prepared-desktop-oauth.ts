@@ -4,7 +4,7 @@ import type { DesktopOAuthSessionInput } from '../services/desktop-oauth-login.s
 import { GoogleLoginOperation } from '../services/google-login-operation';
 
 export interface PreparedDesktopOAuthOperations {
-  prepare(oauthClientKey?: string): Promise<DesktopOAuthSessionInput>;
+  prepare(oauthClientKey?: string, reauthAccountId?: string): Promise<DesktopOAuthSessionInput>;
   open(sessionId: string): Promise<void>;
   copy(sessionId: string): Promise<void>;
   wait(sessionId: string): Promise<CloudAccountView>;
@@ -30,6 +30,7 @@ export class PreparedDesktopOAuth implements PreparedDesktopOAuthOperations {
     private readonly begin: (
       key: string | undefined,
       reveal: RevealPreparedOAuthSession,
+      reauthAccountId?: string,
     ) => Promise<CloudAccountView>,
     private readonly openExternal: (url: string) => Promise<void>,
     private readonly writeClipboard: (url: string) => void,
@@ -37,18 +38,22 @@ export class PreparedDesktopOAuth implements PreparedDesktopOAuthOperations {
     private readonly cancelSession: (sessionId: string) => Promise<void>,
   ) {}
 
-  prepare(oauthClientKey?: string): Promise<DesktopOAuthSessionInput> {
+  prepare(oauthClientKey?: string, reauthAccountId?: string): Promise<DesktopOAuthSessionInput> {
     const ready = Promise.withResolvers<DesktopOAuthSessionInput>();
     const result = Promise.resolve().then(() =>
-      this.begin(oauthClientKey, (session) => {
-        const attempt: PreparedAttempt = { ...session, result };
-        this.attempt = attempt;
-        const forgetLink = () => {
-          attempt.authorizationUrl = null;
-        };
-        result.then(forgetLink, forgetLink);
-        ready.resolve({ sessionId: session.sessionId });
-      }),
+      this.begin(
+        oauthClientKey,
+        (session) => {
+          const attempt: PreparedAttempt = { ...session, result };
+          this.attempt = attempt;
+          const forgetLink = () => {
+            attempt.authorizationUrl = null;
+          };
+          result.then(forgetLink, forgetLink);
+          ready.resolve({ sessionId: session.sessionId });
+        },
+        reauthAccountId,
+      ),
     );
     result.catch(ready.reject);
     return ready.promise;

@@ -37,7 +37,9 @@ import {
   ExternalLink,
   ChevronDown,
   Check,
+  LogIn,
 } from 'lucide-react';
+import { CloudAccountLoginDialog } from '@/modules/cloud-account/components/CloudAccountLoginDialog';
 import { formatAccountLastUsed } from '@/modules/cloud-account/utils/format-last-used';
 import { Badge } from '@/components/ui/badge';
 import { useTranslation } from 'react-i18next';
@@ -411,6 +413,7 @@ export function CloudAccountCard({
   };
 
   const validationLink = useOpenAccountValidationLink();
+  const [isReauthOpen, setIsReauthOpen] = useState(false);
   const { config, saveConfig } = useAppConfig();
   const {
     enabled: providerGroupingsEnabled,
@@ -687,6 +690,13 @@ export function CloudAccountCard({
   const validationBlockedStatusLabel = getCloudAccountBlockedStatusLabel(account, t);
   const isAccountDisabled =
     account.status_reason === 'service_disabled' || Boolean(account.health?.service_disabled);
+  const canSignInAgain =
+    !isAccountDisabled &&
+    (Boolean(account.health?.validation) ||
+      Boolean(account.health?.oauth?.refresh_blocked) ||
+      account.status === 'expired' ||
+      account.status_reason === 'validation_required' ||
+      account.status_reason === 'oauth_reauth');
 
   return (
     <Card
@@ -853,6 +863,25 @@ export function CloudAccountCard({
                 <ExternalLink className="h-3 w-3" />
                 {t('cloud.card.completeValidation')}
               </Button>
+            )}
+            {canSignInAgain && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 gap-1 px-2 text-xs"
+                onClick={() => setIsReauthOpen(true)}
+              >
+                <LogIn className="h-3 w-3" />
+                {t('cloud.card.signInAgain')}
+              </Button>
+            )}
+            {canSignInAgain && (
+              <CloudAccountLoginDialog
+                hideTrigger
+                open={isReauthOpen}
+                onOpenChange={setIsReauthOpen}
+                reauthAccount={{ id: account.id, email: account.email }}
+              />
             )}
             {account.health?.service_disabled?.has_appeal_link &&
               account.health.service_disabled.appeal_url && (
@@ -1212,6 +1241,7 @@ export function CompactCloudAccountCard({
   };
 
   const validationLink = useOpenAccountValidationLink();
+  const [isReauthOpen, setIsReauthOpen] = useState(false);
   const { config } = useAppConfig();
 
   const {
@@ -1279,6 +1309,13 @@ export function CompactCloudAccountCard({
   const validationBlockedStatusLabel = getCloudAccountBlockedStatusLabel(account, t);
   const isAccountDisabled =
     account.status_reason === 'service_disabled' || Boolean(account.health?.service_disabled);
+  const canSignInAgain =
+    !isAccountDisabled &&
+    (Boolean(account.health?.validation) ||
+      Boolean(account.health?.oauth?.refresh_blocked) ||
+      account.status === 'expired' ||
+      account.status_reason === 'validation_required' ||
+      account.status_reason === 'oauth_reauth');
 
   return (
     <div
@@ -1347,6 +1384,24 @@ export function CompactCloudAccountCard({
               <ExternalLink className="h-3 w-3" />
               {t('cloud.card.completeValidation')}
             </button>
+          )}
+          {canSignInAgain && (
+            <button
+              type="button"
+              className="text-primary inline-flex shrink-0 items-center gap-1 text-xs font-semibold hover:underline"
+              onClick={() => setIsReauthOpen(true)}
+            >
+              <LogIn className="h-3 w-3" />
+              {t('cloud.card.signInAgain')}
+            </button>
+          )}
+          {canSignInAgain && (
+            <CloudAccountLoginDialog
+              hideTrigger
+              open={isReauthOpen}
+              onOpenChange={setIsReauthOpen}
+              reauthAccount={{ id: account.id, email: account.email }}
+            />
           )}
           {account.health?.service_disabled?.has_appeal_link &&
             account.health.service_disabled.appeal_url && (

@@ -204,6 +204,51 @@ describe('account dialog state ownership', () => {
     });
   });
 
+  it('transitions from verification prompt into targeted re-authentication with reauthAccountId', async () => {
+    const unverifiedAccount = {
+      id: 'account-reauth-1',
+      provider: 'google',
+      email: 'reauth@example.com',
+      created_at: 1,
+      last_used: 1,
+      status: 'active',
+      health: {
+        validation: {
+          status: 'requires_action',
+          reason: 'VALIDATION_REQUIRED',
+          has_verification_link: true,
+        },
+      },
+    };
+    const verifiedAccount = { ...unverifiedAccount, health: undefined };
+    const firstLogin = Promise.withResolvers<typeof unverifiedAccount>();
+    const reauthLogin = Promise.withResolvers<typeof verifiedAccount>();
+    actions.waitForOAuthSession
+      .mockReturnValueOnce(firstLogin.promise)
+      .mockReturnValueOnce(reauthLogin.promise);
+    actions.prepareOAuthSession
+      .mockResolvedValueOnce({ sessionId: 'session-1' })
+      .mockResolvedValueOnce({ sessionId: 'session-reauth-2' });
+
+    renderDialogs();
+    await userEvent.click(await openLogin());
+    await act(async () => firstLogin.resolve(unverifiedAccount));
+
+    await userEvent.click(await screen.findByRole('button', { name: 'cloud.card.signInAgain' }));
+    await waitFor(() =>
+      expect(actions.prepareOAuthSession).toHaveBeenLastCalledWith(
+        'active-client',
+        'account-reauth-1',
+      ),
+    );
+    await act(async () => reauthLogin.resolve(verifiedAccount));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(actions.toast).toHaveBeenCalledWith({
+      title: 'cloud.toast.reauthSuccess',
+      variant: 'success',
+    });
+  });
+
   it('cancels when leaving the authorization tab and clears the callback on return', async () => {
     renderDialogs();
     await openLogin();

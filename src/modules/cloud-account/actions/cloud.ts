@@ -76,8 +76,11 @@ export function setWeeklyWarmupConfig(config: WeeklyWarmupConfig) {
   return ipc.client.cloud.setWeeklyWarmupConfig(config);
 }
 
-export function prepareOAuthSession(oauthClientKey?: string) {
-  return ipc.client.cloud.oauthSession.prepare(oauthClientKey ? { oauthClientKey } : {});
+export function prepareOAuthSession(oauthClientKey?: string, reauthAccountId?: string) {
+  return ipc.client.cloud.oauthSession.prepare({
+    ...(oauthClientKey ? { oauthClientKey } : {}),
+    ...(reauthAccountId ? { reauthAccountId } : {}),
+  });
 }
 
 export function openOAuthSession(sessionId: string) {

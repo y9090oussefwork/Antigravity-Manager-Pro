@@ -36,6 +36,7 @@ function loginFailureDescription(error: unknown, t: TFunction): string {
       diagnostic.accountCommit === 'uncertain' ||
       ![
         'duplicate-account',
+        'account-mismatch',
         'authorization-denied',
         'login-active',
         'login-cancelled',
@@ -49,8 +50,9 @@ function loginFailureDescription(error: unknown, t: TFunction): string {
 
 interface OAuthAttemptProps {
   clientKey: string;
+  reauthAccountId?: string;
   sessionQueueRef: RefObject<Promise<void>>;
-  onAuthorized: (isCurrent: boolean, account?: CloudAccountView) => void;
+  onAuthorized: (isCurrent: boolean, account?: CloudAccountView, isReauth?: boolean) => void;
   onRestart: () => void;
 }
 
@@ -59,7 +61,13 @@ type Attempt =
   | { kind: 'ready'; sessionId: string }
   | { kind: 'failed'; error: unknown };
 
-function OAuthAttempt({ clientKey, sessionQueueRef, onAuthorized, onRestart }: OAuthAttemptProps) {
+function OAuthAttempt({
+  clientKey,
+  reauthAccountId,
+  sessionQueueRef,
+  onAuthorized,
+  onRestart,
+}: OAuthAttemptProps) {
   const { t } = useTranslation();
   const [attempt, setAttempt] = useState<Attempt>({ kind: 'preparing' });
   const [callback, setCallback] = useState('');
@@ -76,7 +84,9 @@ function OAuthAttempt({ clientKey, sessionQueueRef, onAuthorized, onRestart }: O
         return;
       }
       try {
-        const prepared = await prepareOAuthSession(clientKey);
+        const prepared = reauthAccountId
+          ? await prepareOAuthSession(clientKey, reauthAccountId)
+          : await prepareOAuthSession(clientKey);
         if (!current) {
           await cancelOAuthSession(prepared.sessionId);
           return;
@@ -84,7 +94,7 @@ function OAuthAttempt({ clientKey, sessionQueueRef, onAuthorized, onRestart }: O
         sessionId = prepared.sessionId;
         setAttempt({ kind: 'ready', sessionId });
         waitForOAuthSession(sessionId).then(
-          (account) => onAuthorized(current, account),
+          (account) => onAuthorized(current, account, Boolean(reauthAccountId)),
           (error: unknown) => {
             if (current) {
               setAttempt({ kind: 'failed', error });
@@ -106,7 +116,7 @@ function OAuthAttempt({ clientKey, sessionQueueRef, onAuthorized, onRestart }: O
           .catch(() => undefined);
       }
     };
-  }, [clientKey, onAuthorized, sessionQueueRef]);
+  }, [clientKey, onAuthorized, reauthAccountId, sessionQueueRef]);
 
   async function runAction(next: 'open' | 'copy' | 'submit') {
     if (attempt.kind !== 'ready' || action) {
@@ -246,9 +256,13 @@ function OAuthAttempt({ clientKey, sessionQueueRef, onAuthorized, onRestart }: O
   );
 }
 
-type OAuthPanelProps = Pick<OAuthAttemptProps, 'sessionQueueRef' | 'onAuthorized'>;
+type OAuthPanelProps = Pick<OAuthAttemptProps, 'sessionQueueRef' | 'onAuthorized' | 'reauthAccountId'>;
 
-export function CloudAccountOAuthPanel({ sessionQueueRef, onAuthorized }: OAuthPanelProps) {
+export function CloudAccountOAuthPanel({
+  sessionQueueRef,
+  onAuthorized,
+  reauthAccountId,
+}: OAuthPanelProps) {
   const { t } = useTranslation();
   const { data: clients = [], isPending } = useOAuthClients();
   const setActiveClient = useSetActiveOAuthClient();
@@ -287,8 +301,9 @@ export function CloudAccountOAuthPanel({ sessionQueueRef, onAuthorized }: OAuthP
         </p>
       ) : (
         <OAuthAttempt
-          key={`${active}:${attemptNumber}`}
+          key={`${active}:${reauthAccountId ?? 'new'}:${attemptNumber}`}
           clientKey={active}
+          reauthAccountId={reauthAccountId}
           sessionQueueRef={sessionQueueRef}
           onAuthorized={onAuthorized}
           onRestart={() => setAttemptNumber((number) => number + 1)}

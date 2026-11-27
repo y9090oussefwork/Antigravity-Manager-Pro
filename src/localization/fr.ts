@@ -1341,13 +1341,18 @@ const fr = {
         title: 'Vérification du compte requise',
         description:
           '{{email}} a été enregistré, mais Google exige une vérification avant que Antigravity puisse utiliser ce compte.',
-        hint: 'Terminez d’abord la vérification sur votre téléphone ou navigateur, puis cliquez sur Vérifier à nouveau pour activer le compte immédiatement.',
+        hint: 'Terminez d’abord la vérification sur votre téléphone ou navigateur, puis reconnectez-vous pour activer la session vérifiée.',
         'still-pending':
-          'Google exige toujours une vérification pour ce compte. Terminez la vérification dans votre navigateur, puis vérifiez à nouveau.',
+          'Google exige toujours une vérification pour ce compte. Terminez la vérification dans votre navigateur, puis reconnectez-vous.',
         'recheck-failed':
           'Impossible de vérifier l’état de validation du compte. Réessayez.',
-        recheck: 'Vérifier à nouveau',
+        recheck: 'Vérifier l’état',
         later: 'Vérifier plus tard',
+      },
+      reauth: {
+        title: 'Se reconnecter à Google',
+        description:
+          'Reconnectez-vous avec {{email}} dans votre navigateur pour actualiser l’autorisation et appliquer la vérification.',
       },
     },
     localImport: {
@@ -1424,6 +1429,7 @@ const fr = {
       validationOAuthReauthRequired: 'Reconnectez-vous à Google',
       validationRequired: 'Verification requise',
       completeValidation: 'Verifier',
+      signInAgain: 'Se reconnecter',
       left: 'restant',
       used: 'Utilise',
       unknown: 'Utilisateur inconnu',
@@ -1614,6 +1620,7 @@ const fr = {
         },
       },
       addSuccess: 'Compte ajoute avec succes !',
+      reauthSuccess: 'Compte reconnecté et actualisé avec succès !',
       validationVerified: 'Compte vérifié et prêt à être utilisé !',
       addFailed: {
         title: 'Echec de l ajout du compte',
@@ -1623,6 +1630,8 @@ const fr = {
           'login-cancelled': 'Connexion annulee.',
           'login-timeout': 'La connexion a expire. Recommencez.',
           'duplicate-account': 'Ce compte Google a deja ete ajoute.',
+          'account-mismatch':
+            'Vous vous êtes connecté avec un autre compte Google que celui à reconnecter.',
           'browser-open-failed':
             'Impossible d ouvrir le navigateur. Verifiez le navigateur par defaut.',
           'login-failed': 'Impossible d ajouter le compte. Reessayez.',

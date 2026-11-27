@@ -2088,13 +2088,18 @@ const ptBR = {
         title: 'Verificação da conta necessária',
         description:
           '{{email}} foi salvo, mas o Google exige verificação antes que o Antigravity possa usar esta conta.',
-        hint: 'Conclua primeiro a verificação no celular ou navegador e clique em Verificar novamente para deixar a conta pronta agora.',
+        hint: 'Conclua primeiro a verificação no celular ou navegador e faça login novamente para atualizar a sessão verificada.',
         'still-pending':
-          'O Google ainda exige verificação para esta conta. Conclua a verificação no navegador e tente novamente.',
+          'O Google ainda exige verificação para esta conta. Conclua a verificação no navegador e faça login novamente.',
         'recheck-failed':
           'Não foi possível verificar o status de validação da conta. Tente novamente.',
-        recheck: 'Verificar novamente',
+        recheck: 'Verificar status',
         later: 'Verificar depois',
+      },
+      reauth: {
+        title: 'Entrar novamente no Google',
+        description:
+          'Entre novamente com {{email}} no navegador para atualizar a autorização e concluir a verificação.',
       },
     },
     localImport: {
@@ -2194,6 +2199,7 @@ const ptBR = {
       validationOAuthReauthRequired: 'Fazer login no Google novamente',
       validationRequired: 'Verificação Necessária',
       completeValidation: 'Verificar',
+      signInAgain: 'Entrar novamente',
       left: 'restante',
       used: 'Usado',
       unknown: 'Usuário Desconhecido',
@@ -2385,6 +2391,7 @@ const ptBR = {
         },
       },
       addSuccess: 'Conta adicionada com sucesso!',
+      reauthSuccess: 'Conta reconectada e atualizada com sucesso!',
       validationVerified: 'Conta verificada e pronta para uso!',
       addFailed: {
         title: 'Falha ao adicionar conta',
@@ -2396,6 +2403,8 @@ const ptBR = {
           'login-timeout':
             'O tempo limite de login expirou. Inicie novamente quando estiver pronto.',
           'duplicate-account': 'Esta conta Google já foi adicionada.',
+          'account-mismatch':
+            'Você entrou com uma conta Google diferente da que precisa ser reautenticada.',
           'browser-open-failed':
             'Não foi possível abrir o navegador. Verifique seu navegador padrão e tente novamente.',
           'login-failed': 'Não foi possível adicionar a conta. Tente novamente.',

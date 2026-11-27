@@ -1,6 +1,15 @@
 import { useCallback, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Cloud, DatabaseZap, ExternalLink, KeyRound, Plus, RefreshCw, ShieldAlert } from 'lucide-react';
+import {
+  Cloud,
+  DatabaseZap,
+  ExternalLink,
+  KeyRound,
+  LogIn,
+  Plus,
+  RefreshCw,
+  ShieldAlert,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import {
@@ -29,14 +38,32 @@ const methods = [
 
 type AddMethod = (typeof methods)[number]['id'];
 
-export function CloudAccountLoginDialog() {
+export interface ReauthAccountTarget {
+  id: string;
+  email: string;
+}
+
+export interface CloudAccountLoginDialogProps {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  reauthAccount?: ReauthAccountTarget | null;
+  hideTrigger?: boolean;
+}
+
+export function CloudAccountLoginDialog({
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+  reauthAccount = null,
+  hideTrigger = false,
+}: CloudAccountLoginDialogProps = {}) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const validationLink = useOpenAccountValidationLink();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [method, setMethod] = useState<AddMethod>('google');
   const [importing, setImporting] = useState(false);
+  const [activeReauthTarget, setActiveReauthTarget] = useState<ReauthAccountTarget | null>(null);
   const [pendingValidationAccount, setPendingValidationAccount] = useState<CloudAccountView | null>(
     null,
   );
@@ -46,8 +73,22 @@ export function CloudAccountLoginDialog() {
   );
   const sessionQueueRef = useRef(Promise.resolve());
 
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = useCallback(
+    (nextOpen: boolean) => {
+      if (controlledOnOpenChange) {
+        controlledOnOpenChange(nextOpen);
+      } else {
+        setUncontrolledOpen(nextOpen);
+      }
+    },
+    [controlledOnOpenChange],
+  );
+
+  const effectiveReauthTarget = open ? (activeReauthTarget ?? reauthAccount) : null;
+
   const accountSaved = useCallback(
-    (isCurrent: boolean, account?: CloudAccountView) => {
+    (isCurrent: boolean, account?: CloudAccountView, isReauth?: boolean) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.cloudAccounts });
       if (!isCurrent) {
         return;
@@ -57,11 +98,15 @@ export function CloudAccountLoginDialog() {
         setValidationRecheckState('idle');
         return;
       }
+      setActiveReauthTarget(null);
       setPendingValidationAccount(null);
       setOpen(false);
-      toast({ title: t('cloud.toast.addSuccess'), variant: 'success' });
+      toast({
+        title: t(isReauth ? 'cloud.toast.reauthSuccess' : 'cloud.toast.addSuccess'),
+        variant: 'success',
+      });
     },
-    [queryClient, t, toast],
+    [queryClient, setOpen, t, toast],
   );
 
   const handleRecheckValidation = async () => {
@@ -98,31 +143,38 @@ export function CloudAccountLoginDialog() {
           setOpen(nextOpen);
           setPendingValidationAccount(null);
           setValidationRecheckState('idle');
+          setActiveReauthTarget(null);
           if (nextOpen) {
             setMethod('google');
           }
         }
       }}
     >
-      <DialogTrigger asChild>
-        <Button>
-          <Plus aria-hidden="true" className="size-4" />
-          {t('cloud.addAccount')}
-        </Button>
-      </DialogTrigger>
+      {!hideTrigger && (
+        <DialogTrigger asChild>
+          <Button>
+            <Plus aria-hidden="true" className="size-4" />
+            {t('cloud.addAccount')}
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="max-w-xl" closeDisabled={closeBusy}>
         <DialogHeader>
           <DialogTitle>
             {pendingValidationAccount
               ? t('cloud.authDialog.validation-required.title')
-              : t('cloud.addAccount')}
+              : effectiveReauthTarget
+                ? t('cloud.authDialog.reauth.title')
+                : t('cloud.addAccount')}
           </DialogTitle>
           <DialogDescription>
             {pendingValidationAccount
               ? t('cloud.authDialog.validation-required.description', {
                   email: pendingValidationAccount.email,
                 })
-              : t('cloud.add-flow.description')}
+              : effectiveReauthTarget
+                ? t('cloud.authDialog.reauth.description', { email: effectiveReauthTarget.email })
+                : t('cloud.add-flow.description')}
           </DialogDescription>
         </DialogHeader>
         {open &&
@@ -162,6 +214,22 @@ export function CloudAccountLoginDialog() {
                   )}
                   <Button
                     type="button"
+                    variant="default"
+                    disabled={recheckingValidation}
+                    onClick={() => {
+                      setActiveReauthTarget({
+                        id: pendingValidationAccount.id,
+                        email: pendingValidationAccount.email,
+                      });
+                      setPendingValidationAccount(null);
+                      setValidationRecheckState('idle');
+                    }}
+                  >
+                    <LogIn aria-hidden="true" className="size-4" />
+                    {t('cloud.card.signInAgain')}
+                  </Button>
+                  <Button
+                    type="button"
                     variant="outline"
                     disabled={recheckingValidation}
                     onClick={handleRecheckValidation}
@@ -180,6 +248,7 @@ export function CloudAccountLoginDialog() {
                   onClick={() => {
                     setPendingValidationAccount(null);
                     setValidationRecheckState('idle');
+                    setActiveReauthTarget(null);
                     setOpen(false);
                   }}
                 >
@@ -187,6 +256,12 @@ export function CloudAccountLoginDialog() {
                 </Button>
               </div>
             </div>
+          ) : effectiveReauthTarget ? (
+            <CloudAccountOAuthPanel
+              sessionQueueRef={sessionQueueRef}
+              reauthAccountId={effectiveReauthTarget.id}
+              onAuthorized={accountSaved}
+            />
           ) : (
             <Tabs
               value={method}

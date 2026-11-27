@@ -1,9 +1,11 @@
 import { z } from 'zod';
+import { CloudAccountIdSchema } from './cloud-account-mutation.schema';
 import { OAuthClientKeySchema } from './oauth-client-preference.schema';
 import { GoogleLoginDiagnosticSchema } from './operation-diagnostic.schema';
 
 export const DesktopOAuthLoginInputSchema = z.strictObject({
   oauthClientKey: OAuthClientKeySchema.optional(),
+  reauthAccountId: CloudAccountIdSchema.optional(),
 });
 
 export const DesktopOAuthCodeSchema = z
@@ -27,6 +29,7 @@ export const DesktopOAuthLoginErrorCodeSchema = z.enum([
   'login-cancelled',
   'login-timeout',
   'duplicate-account',
+  'account-mismatch',
   'browser-open-failed',
   'invalid-manual-input',
   'proxy-configuration-invalid',

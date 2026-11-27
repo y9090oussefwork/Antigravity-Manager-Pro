@@ -24,7 +24,9 @@ export const desktopOAuthSessionRouter = {
   prepare: os
     .input(DesktopOAuthLoginInputSchema)
     .output(DesktopOAuthSessionInputSchema)
-    .handler(({ input }) => runOAuthOperation((session) => session.prepare(input.oauthClientKey))),
+    .handler(({ input }) =>
+      runOAuthOperation((session) => session.prepare(input.oauthClientKey, input.reauthAccountId)),
+    ),
   open: os
     .input(DesktopOAuthSessionInputSchema)
     .output(z.void())

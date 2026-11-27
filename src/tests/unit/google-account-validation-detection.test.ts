@@ -267,4 +267,89 @@ describe('Google account validation detection during enrollment and quota refres
       verification_url: VALIDATION_URL,
     });
   });
+
+  it('re-authorizes an existing validation-blocked account in place on fresh OAuth login and rejects mismatched reauth email', async () => {
+    const { ReauthAccountMismatchError } = await import(
+      '@/modules/cloud-account/services/google-account-enrollment.service'
+    );
+    const exchangeSpy = vi.spyOn(GoogleAPIService, 'exchangeCode').mockResolvedValue({
+      access_token: 'pre-verify-access',
+      refresh_token: 'pre-verify-refresh',
+      token_type: 'Bearer',
+      expires_in: 3600,
+    });
+    const userInfoSpy = vi.spyOn(GoogleAPIService, 'getUserInfo').mockResolvedValue({
+      id: 'synthetic-user-3',
+      verified_email: true,
+      email: 'reauth-flow@example.com',
+      name: 'Reauth User',
+      picture: '',
+    });
+    vi.spyOn(GoogleAPIService, 'fetchAICredits').mockResolvedValue(null);
+
+    let verified = false;
+    mockAxiosRequests(
+      vi.fn(async (url: string) => {
+        if (url.includes('loadCodeAssist')) {
+          return {
+            status: 200,
+            json: async () => ({
+              cloudaicompanionProject: 'synthetic-project',
+              paidTier: { id: 'g1-pro-tier' },
+              ...(verified
+                ? {}
+                : {
+                    ineligibleTiers: [
+                      {
+                        reasonCode: 'VALIDATION_REQUIRED',
+                        validationUrl: VALIDATION_URL,
+                      },
+                    ],
+                  }),
+            }),
+          };
+        }
+        if (url.includes('retrieveUserQuotaSummary')) {
+          return verified
+            ? { status: 200, json: async () => ({ groups: [] }) }
+            : { status: 403, json: async () => validation403Payload() };
+        }
+        return { status: 200, json: async () => ({ models: {} }) };
+      }),
+    );
+
+    const enrolled = await enrollGoogleAccount('code-1', {
+      redirectUri: 'http://127.0.0.1/callback',
+    });
+    expect(enrolled.health?.validation?.reason).toBe('VALIDATION_REQUIRED');
+
+    verified = true;
+    exchangeSpy.mockResolvedValueOnce({
+      access_token: 'post-verify-access',
+      refresh_token: 'post-verify-refresh',
+      token_type: 'Bearer',
+      expires_in: 3600,
+    });
+    const reauthorized = await enrollGoogleAccount('code-2', {
+      redirectUri: 'http://127.0.0.1/callback',
+    });
+    expect(reauthorized.id).toBe(enrolled.id);
+    expect(reauthorized.token.access_token).toBe('post-verify-access');
+    expect(reauthorized.token.refresh_token).toBe('post-verify-refresh');
+    expect(reauthorized.health?.validation).toBeUndefined();
+
+    userInfoSpy.mockResolvedValueOnce({
+      id: 'other-user',
+      verified_email: true,
+      email: 'different@example.com',
+      name: 'Other',
+      picture: '',
+    });
+    await expect(
+      enrollGoogleAccount('code-3', {
+        redirectUri: 'http://127.0.0.1/callback',
+        reauthAccountId: enrolled.id,
+      }),
+    ).rejects.toBeInstanceOf(ReauthAccountMismatchError);
+  });
 });

@@ -1,8 +1,10 @@
 import crypto from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import { CloudAccountRepo } from '@/modules/cloud-account/persistence/cloudHandler';
 import { GoogleAPIService } from './GoogleAPIService';
 import {
   DuplicateGoogleAccountError,
+  ReauthAccountMismatchError,
   enrollGoogleAccount,
 } from './google-account-enrollment.service';
 import { logger } from '@/shared/logging/logger';
@@ -40,6 +42,7 @@ interface OAuthSession {
   state: string;
   redirectUri: string;
   clientKey?: string;
+  reauthAccountId?: string;
   server: FastifyInstance;
   timer: NodeJS.Timeout | null;
   consumed: boolean;
@@ -67,6 +70,7 @@ export class HeadlessOAuthSessionService {
   async start(
     oauthClientKey?: string,
     operation = new GoogleLoginOperation(),
+    reauthAccountId?: string,
   ): Promise<{ sessionId: string; authorizationUrl: string; diagnosticId: string }> {
     if (this.stopping) {
       throw new DesktopOAuthLoginError(
@@ -78,7 +82,9 @@ export class HeadlessOAuthSessionService {
       throw new OAuthLoginActiveError(operation.finish(undefined, 'login-active', true));
     }
 
-    const starting = operation.context.run(() => this.startSession(oauthClientKey, operation));
+    const starting = operation.context.run(() =>
+      this.startSession(oauthClientKey, operation, reauthAccountId),
+    );
     this.starting = starting;
     try {
       return await starting;
@@ -90,14 +96,19 @@ export class HeadlessOAuthSessionService {
   private async startSession(
     oauthClientKey?: string,
     operation = new GoogleLoginOperation(),
+    reauthAccountId?: string,
   ): Promise<{ sessionId: string; authorizationUrl: string; diagnosticId: string }> {
     const clientKey = oauthClientKey ?? GoogleAPIService.getActiveOAuthClientKey();
+    const reauthEmail = reauthAccountId
+      ? (await CloudAccountRepo.getAccount(reauthAccountId))?.email
+      : undefined;
     const session: OAuthSession = {
       operation,
       id: crypto.randomUUID(),
       state: crypto.randomBytes(32).toString('base64url'),
       redirectUri: '',
       clientKey,
+      reauthAccountId,
       server: Fastify({ logger: false, forceCloseConnections: true }),
       timer: null,
       consumed: false,
@@ -134,6 +145,7 @@ export class HeadlessOAuthSessionService {
         GoogleAPIService.getAuthUrl(clientKey, {
           redirectUri: session.redirectUri,
           state: session.state,
+          ...(reauthEmail ? { loginHint: reauthEmail } : {}),
         }),
       );
       this.session = session;
@@ -269,6 +281,7 @@ export class HeadlessOAuthSessionService {
         oauthClientKey: session.clientKey,
         redirectUri: session.redirectUri,
         operation: session.operation,
+        ...(session.reauthAccountId ? { reauthAccountId: session.reauthAccountId } : {}),
       });
       try {
         await this.reloadGatewayAccounts();
@@ -281,20 +294,26 @@ export class HeadlessOAuthSessionService {
     } catch (error) {
       const proxyInvalid =
         classifyOperationCause(error).primary.reason === 'proxy-configuration-invalid';
+      const isDuplicate = error instanceof DuplicateGoogleAccountError;
+      const isMismatch = error instanceof ReauthAccountMismatchError;
       this.fail(
         session,
-        error instanceof DuplicateGoogleAccountError
+        isDuplicate
           ? 'duplicate-account'
-          : proxyInvalid
-            ? 'proxy-configuration-invalid'
-            : 'login-failed',
-        error instanceof DuplicateGoogleAccountError
+          : isMismatch
+            ? 'account-mismatch'
+            : proxyInvalid
+              ? 'proxy-configuration-invalid'
+              : 'login-failed',
+        isDuplicate
           ? 'Google account already exists'
-          : proxyInvalid
-            ? UPSTREAM_PROXY_CONFIGURATION_MESSAGE
-            : 'Google account enrollment failed',
+          : isMismatch
+            ? 'Signed-in Google account does not match the account being re-authenticated'
+            : proxyInvalid
+              ? UPSTREAM_PROXY_CONFIGURATION_MESSAGE
+              : 'Google account enrollment failed',
         error,
-        error instanceof DuplicateGoogleAccountError ? 'duplicate-account' : undefined,
+        isDuplicate || isMismatch ? 'duplicate-account' : undefined,
       );
     }
   }
@@ -311,6 +330,7 @@ export class HeadlessOAuthSessionService {
     }
     const expected = [
       'duplicate-account',
+      'account-mismatch',
       'authorization-denied',
       'login-cancelled',
       'login-active',

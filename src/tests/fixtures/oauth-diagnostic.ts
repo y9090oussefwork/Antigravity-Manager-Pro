@@ -13,6 +13,7 @@ export function loginDiagnostic(
     'login-cancelled': 'cancelled',
     'login-timeout': 'timed-out',
     'duplicate-account': 'duplicate-account',
+    'account-mismatch': 'duplicate-account',
     'browser-open-failed': 'unknown',
     'invalid-manual-input': 'malformed-response',
     'proxy-configuration-invalid': 'proxy-configuration-invalid',
@@ -33,6 +34,7 @@ export function loginDiagnostic(
         'login-active',
         'login-cancelled',
         'duplicate-account',
+        'account-mismatch',
         'invalid-manual-input',
       ].includes(code)
         ? 'expected-outcome'

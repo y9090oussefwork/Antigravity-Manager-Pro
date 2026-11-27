@@ -1872,12 +1872,17 @@ const en = {
         title: 'Account Verification Required',
         description:
           '{{email}} was saved, but Google requires verification before Antigravity can use this account.',
-        hint: 'Complete the phone or browser verification step first, then click Check Verification so the account is ready right away.',
+        hint: 'Complete the phone or browser verification step first, then sign in again so the app picks up your verified session right away.',
         'still-pending':
-          'Google still requires verification for this account. Finish the verification step in your browser, then check again.',
+          'Google still requires verification for this account. Complete verification in your browser, then sign in again.',
         'recheck-failed': 'Could not check account verification status. Try again.',
-        recheck: 'Check Verification',
+        recheck: 'Check Status',
         later: 'Verify Later',
+      },
+      reauth: {
+        title: 'Sign in again to Google',
+        description:
+          'Sign in again with {{email}} in your browser to refresh authorization and apply verification.',
       },
     },
     localImport: {
@@ -1976,6 +1981,7 @@ const en = {
       validationOAuthReauthRequired: 'Sign in to Google again',
       validationRequired: 'Verification Required',
       completeValidation: 'Verify',
+      signInAgain: 'Sign in again',
       left: 'left',
       used: 'Used',
       unknown: 'Unknown User',
@@ -2158,6 +2164,7 @@ const en = {
         },
       },
       addSuccess: 'Account added successfully!',
+      reauthSuccess: 'Account signed in again and refreshed!',
       validationVerified: 'Account verified and ready to use!',
       addFailed: {
         title: 'Failed to add account',
@@ -2167,6 +2174,8 @@ const en = {
           'login-cancelled': 'Sign-in was cancelled.',
           'login-timeout': 'Sign-in timed out. Start again when ready.',
           'duplicate-account': 'This Google account is already added.',
+          'account-mismatch':
+            'You signed in with a different Google account than the one being re-authenticated.',
           'browser-open-failed':
             'Could not open the browser. Check your default browser and retry.',
           'login-failed': 'Could not add the account. Please retry.',

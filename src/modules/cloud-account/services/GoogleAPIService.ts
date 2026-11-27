@@ -815,7 +815,7 @@ export class GoogleAPIService {
    */
   static getAuthUrl(
     oauthClientKey: string | undefined,
-    session: { redirectUri: string; state: string },
+    session: { redirectUri: string; state: string; loginHint?: string },
   ): string {
     assertValidUpstreamProxyConfig(ConfigManager.loadConfig().proxy.upstream_proxy);
     const oauthClient = OAuthClientRegistryService.selectAuthClient(oauthClientKey);
@@ -830,6 +830,9 @@ export class GoogleAPIService {
       include_granted_scopes: 'true',
       state: session.state,
     });
+    if (session.loginHint?.trim()) {
+      params.set('login_hint', session.loginHint.trim());
+    }
 
     return `${URLS.AUTH}?${params.toString()}`;
   }
