@@ -24,9 +24,14 @@ import {
 import {
   classifyWorkspaceAccountStatus,
   formatWorkspaceAccountQuotaSummary,
-  getWorkspaceAccountMinQuotaPercentage,
 } from '@/modules/workspace/utils/workspace-account-status';
 import { useAccountModelCategoryOverrides } from '@/modules/cloud-account/hooks/useAccountModelCategoryOverrides';
+import { useQuotaGroupVisibility } from '@/modules/cloud-account/hooks/useQuotaGroupVisibility';
+import {
+  isClaudeQuotaHidden,
+  withClaudeQuotaVisible,
+} from '@/modules/cloud-account/utils/quota-group-visibility';
+import { WorkspaceQuotaBadges } from './WorkspaceQuotaBadges';
 import { selectWorkspaceDirectory } from '@/modules/workspace/actions/workspace';
 import type { CloudAccountView } from '@/modules/cloud-account/services/cloud-account-view';
 import type {
@@ -68,6 +73,8 @@ export const WorkspaceDialog: React.FC<WorkspaceDialogProps> = ({
   onSelectDirectory = selectWorkspaceDirectory,
 }) => {
   const { t } = useTranslation();
+  const [quotaGroupVisibility, setQuotaGroupVisibility] = useQuotaGroupVisibility();
+  const claudeHidden = isClaudeQuotaHidden(quotaGroupVisibility);
   const activeProfile = workspace ?? initialData ?? null;
   const isEdit = Boolean(activeProfile);
 
@@ -281,11 +288,27 @@ export const WorkspaceDialog: React.FC<WorkspaceDialogProps> = ({
 
           {/* Assigned Google Accounts Pool */}
           <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <Label htmlFor="ws-account-search">{t('workspace-profile.assigned-accounts')}</Label>
-              <span className="text-muted-foreground text-xs tabular-nums">
-                {t('workspace-profile.selected-accounts-count', { count: accountIds.length })}
-              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  size="xs"
+                  variant={claudeHidden ? 'secondary' : 'outline'}
+                  aria-pressed={claudeHidden}
+                  onClick={() =>
+                    setQuotaGroupVisibility((current) =>
+                      withClaudeQuotaVisible(current, isClaudeQuotaHidden(current)),
+                    )
+                  }
+                  className="h-6 px-2 text-xs"
+                >
+                  {t('cloud.quota-display.gemini-only-short')}
+                </Button>
+                <span className="text-muted-foreground text-xs tabular-nums">
+                  {t('workspace-profile.selected-accounts-count', { count: accountIds.length })}
+                </span>
+              </div>
             </div>
             {accounts.length === 0 ? (
               <div className="border-warning-border bg-warning-soft/30 text-warning rounded-lg border p-3 text-xs">
@@ -330,10 +353,16 @@ export const WorkspaceDialog: React.FC<WorkspaceDialogProps> = ({
                     filteredAccounts.map((acc) => {
                       const isChecked = selectedSet.has(acc.id);
                       const isCurrentActive = acc.id === accountId;
-                      const accountStatus = classifyWorkspaceAccountStatus(acc, accountId);
+                      const accountStatus = classifyWorkspaceAccountStatus(
+                        acc,
+                        accountId,
+                        quotaGroupVisibility,
+                      );
                       const modelCategory = resolveAccountModelCategory(acc, categoryOverrides);
-                      const minQuota = getWorkspaceAccountMinQuotaPercentage(acc.quota);
-                      const quotaTitle = formatWorkspaceAccountQuotaSummary(acc.quota);
+                      const quotaTitle = formatWorkspaceAccountQuotaSummary(
+                        acc.quota,
+                        quotaGroupVisibility,
+                      );
 
                       return (
                         <div
@@ -364,14 +393,14 @@ export const WorkspaceDialog: React.FC<WorkspaceDialogProps> = ({
                               <div className="text-foreground truncate text-xs font-medium">
                                 {acc.email}
                               </div>
-                              <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px]">
+                              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
                                 {acc.quota?.subscription_tier && (
-                                  <Badge variant="outline" className="h-4 px-1 py-0 text-[10px]">
+                                  <Badge variant="outline" className="h-5 px-1.5 py-0 text-xs">
                                     {acc.quota.subscription_tier}
                                   </Badge>
                                 )}
                                 {modelCategory !== 'other' && (
-                                  <Badge variant="secondary" className="h-4 px-1 py-0 text-[10px]">
+                                  <Badge variant="secondary" className="h-5 px-1.5 py-0 text-xs">
                                     {t(`cloud.model-category.${modelCategory}`)}
                                   </Badge>
                                 )}
@@ -379,15 +408,18 @@ export const WorkspaceDialog: React.FC<WorkspaceDialogProps> = ({
                                   title={quotaTitle}
                                   className={
                                     accountStatus === 'available' || accountStatus === 'active'
-                                      ? 'text-success'
+                                      ? 'text-success font-medium'
                                       : accountStatus === 'exhausted'
-                                        ? 'text-amber-600 dark:text-amber-400'
-                                        : 'text-destructive'
+                                        ? 'text-amber-600 font-medium dark:text-amber-400'
+                                        : 'text-destructive font-medium'
                                   }
                                 >
                                   {t(`workspace-profile.account-status.${accountStatus}`)}
-                                  {minQuota !== null ? ` (${minQuota}%)` : ''}
                                 </span>
+                                <WorkspaceQuotaBadges
+                                  quota={acc.quota}
+                                  visibility={quotaGroupVisibility}
+                                />
                               </div>
                             </label>
                           </div>

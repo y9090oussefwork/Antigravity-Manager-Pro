@@ -1297,6 +1297,8 @@ const fr = {
       title: 'Affichage des quotas',
       description:
         'Choisissez les quotas affichés sur les cartes. Cela ne change ni les quotas ni le compte utilisé pour les requêtes.',
+      'show-claude-everywhere': 'Afficher le quota Claude / GPT partout',
+      'gemini-only-short': 'Gemini uniquement',
       'five-hours-gemini': 'Quota Gemini sur 5 heures',
       'five-hours-claude': 'Quota Claude sur 5 heures',
       'weekly-gemini': 'Quota hebdomadaire Gemini',

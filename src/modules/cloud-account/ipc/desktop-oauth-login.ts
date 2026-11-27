@@ -28,6 +28,7 @@ interface OAuthSessionClient {
     clientKey?: string,
     operation?: GoogleLoginOperation,
     reauthAccountId?: string,
+    loginHint?: string,
   ): ReturnType<HeadlessOAuthSessionService['start']>;
   status(sessionId: string): HeadlessOAuthStatus | null;
   cancel(sessionId: string): Promise<void>;
@@ -48,7 +49,8 @@ export class DesktopOAuthLogin {
   private session: { id: string; mode: 'legacy' | 'prepared' } | null = null;
   private stopping = false;
   readonly prepared = new PreparedDesktopOAuth(
-    (key, reveal, reauthAccountId) => this.begin(key, reveal, reauthAccountId),
+    (key, reveal, reauthAccountId, loginHint) =>
+      this.begin(key, reveal, reauthAccountId, loginHint),
     (url) => this.dependencies.openExternal(url),
     (url) =>
       this.dependencies.writeClipboard
@@ -68,6 +70,7 @@ export class DesktopOAuthLogin {
     oauthClientKey?: string,
     reveal?: RevealPreparedOAuthSession,
     reauthAccountId?: string,
+    loginHint?: string,
   ): Promise<CloudAccountView> {
     const operation = new GoogleLoginOperation();
     if (this.stopping) {
@@ -82,7 +85,7 @@ export class DesktopOAuthLogin {
         operation.finish(undefined, 'login-active', true),
       );
     }
-    const pending = this.run(operation, oauthClientKey, reveal, reauthAccountId);
+    const pending = this.run(operation, oauthClientKey, reveal, reauthAccountId, loginHint);
     this.pending = pending;
     const clearPending = () => {
       if (this.pending === pending) {
@@ -98,11 +101,17 @@ export class DesktopOAuthLogin {
     oauthClientKey?: string,
     reveal?: RevealPreparedOAuthSession,
     reauthAccountId?: string,
+    loginHint?: string,
   ): Promise<CloudAccountView> {
     let started: Awaited<ReturnType<OAuthSessionClient['start']>> | undefined;
     try {
       await operation.run('client-selection', () => this.dependencies.selectClient(oauthClientKey));
-      started = await this.dependencies.session.start(undefined, operation, reauthAccountId);
+      started = await this.dependencies.session.start(
+        undefined,
+        operation,
+        reauthAccountId,
+        loginHint,
+      );
       this.session = { id: started.sessionId, mode: reveal ? 'prepared' : 'legacy' };
       operation.enter('authorization-url');
       const authorizationUrl = normalizeTrustedGoogleValidationUrl(started.authorizationUrl);

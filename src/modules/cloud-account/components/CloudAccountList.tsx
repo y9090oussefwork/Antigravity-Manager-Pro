@@ -40,10 +40,7 @@ import {
 } from '@/modules/cloud-account/components/CloudAccountListFallbacks';
 import { CloudAccountToolbar } from '@/modules/cloud-account/components/CloudAccountToolbar';
 import type { QuotaWindow } from '@/modules/cloud-account/utils/quota-groups';
-import {
-  readQuotaGroupVisibility,
-  saveQuotaGroupVisibility,
-} from '@/modules/cloud-account/utils/quota-group-visibility';
+import { useQuotaGroupVisibility } from '@/modules/cloud-account/hooks/useQuotaGroupVisibility';
 import {
   readQuotaWindowPreference,
   saveQuotaWindowPreference,
@@ -112,12 +109,7 @@ function CloudAccountListContent() {
     saveQuotaWindowPreference(() => window.localStorage, quotaWindow);
   }, [quotaWindow]);
 
-  const [quotaGroupVisibility, setQuotaGroupVisibility] = useState(() =>
-    readQuotaGroupVisibility(() => window.localStorage),
-  );
-  useEffect(() => {
-    saveQuotaGroupVisibility(() => window.localStorage, quotaGroupVisibility);
-  }, [quotaGroupVisibility]);
+  const [quotaGroupVisibility, setQuotaGroupVisibility] = useQuotaGroupVisibility();
 
   const [isMinimalMode, setIsMinimalMode] = useState<boolean>(() =>
     readMinimalModePreference(() => window.localStorage),

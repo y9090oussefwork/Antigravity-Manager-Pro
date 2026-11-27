@@ -61,6 +61,15 @@ import {
 } from '@/modules/cloud-account/services/cloud-account-identity-profile.schema';
 import { toCloudIdentityProfileORPCError } from '@/modules/cloud-account/services/cloud-account-identity-profile.error';
 import { localAccountImportRouter } from '@/modules/cloud-account/local-import/ipc/router';
+import {
+  BrowserProfileDiscoveryResultSchema,
+  OpenBrowserProfileInputSchema,
+} from '@/modules/cloud-account/services/browser-profile-discovery.schema';
+import {
+  discoverBrowserProfiles,
+  launchBrowserProfile,
+} from '@/modules/cloud-account/services/browser-profile-discovery.service';
+import { normalizeTrustedGoogleValidationUrl } from '@/modules/cloud-account/utils/google-validation-url';
 export {
   type LocalAccountImportORPCErrorData,
   parseLocalAccountImportORPCErrorData,
@@ -369,4 +378,37 @@ export const cloudRouter = os.router({
     .input(CloudAccountImportInputSchema)
     .output(CloudAccountImportResultSchema)
     .handler(({ input }) => chooseAndImportCloudAccountFile(input.strategy)),
+  discoverBrowserProfiles: os.output(BrowserProfileDiscoveryResultSchema).handler(async () => {
+    const accounts = await getCloudAccountAdapter().listViews();
+    return discoverBrowserProfiles(accounts);
+  }),
+  openBrowserProfile: os
+    .input(OpenBrowserProfileInputSchema)
+    .output(z.void())
+    .handler(async ({ input }) => {
+      try {
+        let authorizationUrl: string | undefined;
+        if (input.sessionId) {
+          const oauthSession = await getCloudAccountAdapter().getOAuthSession();
+          const rawUrl = oauthSession.getAuthorizationUrl(input.sessionId);
+          const normalized = normalizeTrustedGoogleValidationUrl(rawUrl);
+          if (normalized) {
+            const urlObj = new URL(normalized);
+            if (input.loginHint && !urlObj.searchParams.has('login_hint')) {
+              urlObj.searchParams.set('login_hint', input.loginHint);
+            }
+            authorizationUrl = urlObj.toString();
+          }
+        }
+        await launchBrowserProfile(
+          {
+            browserId: input.browserId,
+            profileDirectory: input.profileDirectory,
+          },
+          { ...(authorizationUrl ? { authorizationUrl } : {}) },
+        );
+      } catch (error) {
+        throw toDesktopOAuthLoginORPCError(error);
+      }
+    }),
 });

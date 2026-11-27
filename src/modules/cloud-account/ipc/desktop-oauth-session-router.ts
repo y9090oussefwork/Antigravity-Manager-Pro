@@ -25,7 +25,15 @@ export const desktopOAuthSessionRouter = {
     .input(DesktopOAuthLoginInputSchema)
     .output(DesktopOAuthSessionInputSchema)
     .handler(({ input }) =>
-      runOAuthOperation((session) => session.prepare(input.oauthClientKey, input.reauthAccountId)),
+      runOAuthOperation((session) => {
+        if (input.loginHint !== undefined) {
+          return session.prepare(input.oauthClientKey, input.reauthAccountId, input.loginHint);
+        }
+        if (input.reauthAccountId !== undefined) {
+          return session.prepare(input.oauthClientKey, input.reauthAccountId);
+        }
+        return session.prepare(input.oauthClientKey);
+      }),
     ),
   open: os
     .input(DesktopOAuthSessionInputSchema)

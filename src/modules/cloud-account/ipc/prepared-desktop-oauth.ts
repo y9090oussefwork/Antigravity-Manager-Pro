@@ -4,7 +4,12 @@ import type { DesktopOAuthSessionInput } from '../services/desktop-oauth-login.s
 import { GoogleLoginOperation } from '../services/google-login-operation';
 
 export interface PreparedDesktopOAuthOperations {
-  prepare(oauthClientKey?: string, reauthAccountId?: string): Promise<DesktopOAuthSessionInput>;
+  prepare(
+    oauthClientKey?: string,
+    reauthAccountId?: string,
+    loginHint?: string,
+  ): Promise<DesktopOAuthSessionInput>;
+  getAuthorizationUrl(sessionId: string): string;
   open(sessionId: string): Promise<void>;
   copy(sessionId: string): Promise<void>;
   wait(sessionId: string): Promise<CloudAccountView>;
@@ -31,6 +36,7 @@ export class PreparedDesktopOAuth implements PreparedDesktopOAuthOperations {
       key: string | undefined,
       reveal: RevealPreparedOAuthSession,
       reauthAccountId?: string,
+      loginHint?: string,
     ) => Promise<CloudAccountView>,
     private readonly openExternal: (url: string) => Promise<void>,
     private readonly writeClipboard: (url: string) => void,
@@ -38,7 +44,11 @@ export class PreparedDesktopOAuth implements PreparedDesktopOAuthOperations {
     private readonly cancelSession: (sessionId: string) => Promise<void>,
   ) {}
 
-  prepare(oauthClientKey?: string, reauthAccountId?: string): Promise<DesktopOAuthSessionInput> {
+  prepare(
+    oauthClientKey?: string,
+    reauthAccountId?: string,
+    loginHint?: string,
+  ): Promise<DesktopOAuthSessionInput> {
     const ready = Promise.withResolvers<DesktopOAuthSessionInput>();
     const result = Promise.resolve().then(() =>
       this.begin(
@@ -53,10 +63,15 @@ export class PreparedDesktopOAuth implements PreparedDesktopOAuthOperations {
           ready.resolve({ sessionId: session.sessionId });
         },
         reauthAccountId,
+        loginHint,
       ),
     );
     result.catch(ready.reject);
     return ready.promise;
+  }
+
+  getAuthorizationUrl(sessionId: string): string {
+    return this.activeUrl(sessionId);
   }
 
   async open(sessionId: string): Promise<void> {

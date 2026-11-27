@@ -995,7 +995,11 @@ export function CloudAccountCard({
             {t('cloud.card.serviceBlockedNotice')}
           </div>
         ) : compactQuotaSummary ? (
-          <CompactQuotaSummary quota={account.quota} />
+          <CompactQuotaSummary
+            quota={account.quota}
+            quotaGroupVisibility={quotaGroupVisibility}
+            quotaWindow={quotaWindow}
+          />
         ) : (
           <div className="space-y-2">
             <AccountQuotaWindowSections
@@ -1441,7 +1445,11 @@ export function CompactCloudAccountCard({
             {t('cloud.card.serviceBlockedNotice')}
           </div>
         ) : compactQuotaSummary ? (
-          <CompactQuotaSummary quota={account.quota} />
+          <CompactQuotaSummary
+            quota={account.quota}
+            quotaGroupVisibility={quotaGroupVisibility}
+            quotaWindow={quotaWindow}
+          />
         ) : (
           <>
             <AccountQuotaWindowSections

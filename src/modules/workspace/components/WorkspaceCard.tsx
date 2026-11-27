@@ -27,16 +27,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { AccountTierBadge } from '@/modules/cloud-account/components/AccountTierBadge';
+import { useQuotaGroupVisibility } from '@/modules/cloud-account/hooks/useQuotaGroupVisibility';
 import { useToast } from '@/components/ui/use-toast';
 import {
   classifyWorkspaceAccountStatus,
   filterWorkspaceAccountsByStatus,
-  formatWorkspaceAccountQuotaSummary,
-  getWorkspaceAccountMinQuotaPercentage,
   getWorkspaceAccountStatusCounts,
   type WorkspaceAccountStatusFilter,
 } from '@/modules/workspace/utils/workspace-account-status';
 import type { WorkspaceProfileView } from '@/modules/workspace/types';
+import { WorkspaceQuotaBadges } from './WorkspaceQuotaBadges';
 
 export interface WorkspaceCardProps {
   workspace: WorkspaceProfileView;
@@ -76,14 +76,20 @@ export const WorkspaceCard: React.FC<WorkspaceCardProps> = ({
   const toast = customToast ?? defaultToast;
   const [copied, setCopied] = useState(false);
   const [accountFilter, setAccountFilter] = useState<WorkspaceAccountStatusFilter>('all');
+  const [quotaGroupVisibility] = useQuotaGroupVisibility();
   const isRunning = workspace.status.running;
   const account = workspace.account;
   const assignedAccounts = workspace.accounts ?? [];
-  const statusCounts = getWorkspaceAccountStatusCounts(assignedAccounts, workspace.accountId);
+  const statusCounts = getWorkspaceAccountStatusCounts(
+    assignedAccounts,
+    workspace.accountId,
+    quotaGroupVisibility,
+  );
   const filteredAssignedAccounts = filterWorkspaceAccountsByStatus(
     assignedAccounts,
     workspace.accountId,
     accountFilter,
+    quotaGroupVisibility,
   );
 
   const handleCopyPath = async (e: React.MouseEvent) => {
@@ -214,6 +220,13 @@ export const WorkspaceCard: React.FC<WorkspaceCardProps> = ({
               </Badge>
             )}
           </div>
+          {account && (
+            <WorkspaceQuotaBadges
+              quota={account.quota}
+              visibility={quotaGroupVisibility}
+              className="mt-2"
+            />
+          )}
         </div>
 
         {/* Assigned Account Pool & Per-Project Auto-Switch */}
@@ -270,41 +283,43 @@ export const WorkspaceCard: React.FC<WorkspaceCardProps> = ({
                 ) : (
                   <div className="max-h-36 divide-y overflow-y-auto rounded-md border">
                     {filteredAssignedAccounts.map((poolAcc) => {
-                      const status = classifyWorkspaceAccountStatus(poolAcc, workspace.accountId);
+                      const status = classifyWorkspaceAccountStatus(
+                        poolAcc,
+                        workspace.accountId,
+                        quotaGroupVisibility,
+                      );
                       const isCurrent = status === 'active';
                       const isSwitchingThis =
                         isSwitchingAccount && switchingAccountId === poolAcc.id;
-                      const minQuota = getWorkspaceAccountMinQuotaPercentage(poolAcc.quota);
 
                       return (
                         <div
                           key={poolAcc.id}
                           className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs"
                         >
-                          <div className="flex min-w-0 flex-1 items-center gap-2">
-                            <span
-                              className={`h-2 w-2 shrink-0 rounded-full ${
-                                status === 'active'
-                                  ? 'bg-primary'
-                                  : status === 'available'
-                                    ? 'bg-success'
-                                    : status === 'exhausted'
-                                      ? 'bg-amber-500'
-                                      : 'bg-destructive'
-                              }`}
-                              aria-hidden="true"
-                            />
-                            <span className="text-foreground truncate text-[11px] font-medium">
-                              {poolAcc.email}
-                            </span>
-                            {minQuota !== null && (
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <div className="flex min-w-0 items-center gap-2">
                               <span
-                                title={formatWorkspaceAccountQuotaSummary(poolAcc.quota)}
-                                className="text-muted-foreground shrink-0 text-[10px] tabular-nums"
-                              >
-                                {minQuota}%
+                                className={`h-2 w-2 shrink-0 rounded-full ${
+                                  status === 'active'
+                                    ? 'bg-primary'
+                                    : status === 'available'
+                                      ? 'bg-success'
+                                      : status === 'exhausted'
+                                        ? 'bg-amber-500'
+                                        : 'bg-destructive'
+                                }`}
+                                aria-hidden="true"
+                              />
+                              <span className="text-foreground truncate text-xs font-medium">
+                                {poolAcc.email}
                               </span>
-                            )}
+                            </div>
+                            <WorkspaceQuotaBadges
+                              quota={poolAcc.quota}
+                              visibility={quotaGroupVisibility}
+                              className="ps-4"
+                            />
                           </div>
 
                           <div className="shrink-0">

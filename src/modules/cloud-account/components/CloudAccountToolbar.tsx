@@ -170,6 +170,7 @@ export function CloudAccountToolbar({
 
           <div className="ml-auto flex flex-wrap items-center gap-2 [@media(max-width:760px)]:ml-0 [@media(max-width:760px)]:w-full">
             <CloudAccountTransferMenu />
+            <CloudAccountLoginDialog initialMethod="browsers" />
             <CloudAccountLoginDialog />
           </div>
         </div>

@@ -21,6 +21,8 @@ const actions = vi.hoisted(() => ({
   exportCloudAccounts: vi.fn(),
   importCloudAccounts: vi.fn(),
   previewLocalImport: vi.fn(),
+  discoverBrowserProfiles: vi.fn(),
+  openBrowserProfile: vi.fn(),
   toast: vi.fn(),
   parentRender: vi.fn(),
   siblingRender: vi.fn(),
@@ -50,6 +52,13 @@ beforeEach(() => {
   actions.openAccountValidationLink.mockResolvedValue(undefined);
   actions.refreshAccountQuota.mockResolvedValue(undefined);
   actions.setActiveOAuthClient.mockResolvedValue(undefined);
+  actions.discoverBrowserProfiles.mockResolvedValue({
+    profiles: [],
+    scannedBrowsers: [],
+    totalAccounts: 0,
+    unaddedAccounts: 0,
+  });
+  actions.openBrowserProfile.mockResolvedValue(undefined);
 });
 afterEach(async () => {
   await act(async () => cleanup());
@@ -396,5 +405,62 @@ describe('account dialog state ownership', () => {
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it('discovers unadded browser accounts and launches the exact browser profile with loginHint', async () => {
+    actions.discoverBrowserProfiles.mockResolvedValue({
+      profiles: [
+        {
+          id: 'chrome:Profile 23',
+          browserId: 'chrome',
+          browserName: 'Google Chrome',
+          profileDirectory: 'Profile 23',
+          profileName: 'Work Profile',
+          canLaunch: true,
+          accounts: [
+            {
+              email: 'new-profile-user@gmail.com',
+              fullName: 'New Profile User',
+              isAdded: false,
+              needsValidation: false,
+            },
+          ],
+        },
+      ],
+      scannedBrowsers: [
+        {
+          browserId: 'chrome',
+          browserName: 'Google Chrome',
+          canLaunch: true,
+          profileCount: 1,
+          accountCount: 1,
+        },
+      ],
+      totalAccounts: 1,
+      unaddedAccounts: 1,
+    });
+
+    renderDialogs();
+    await userEvent.click(screen.getByRole('button', { name: 'cloud.addAccount' }));
+    await userEvent.click(screen.getByRole('tab', { name: 'cloud.add-flow.tabs.browsers' }));
+
+    expect(await screen.findByText('new-profile-user@gmail.com')).toBeDefined();
+    await userEvent.click(
+      screen.getByRole('button', { name: 'cloud.add-flow.browsers.add-in-profile' }),
+    );
+
+    await waitFor(() => {
+      expect(actions.prepareOAuthSession).toHaveBeenCalledWith(
+        undefined,
+        undefined,
+        'new-profile-user@gmail.com',
+      );
+      expect(actions.openBrowserProfile).toHaveBeenCalledWith({
+        browserId: 'chrome',
+        profileDirectory: 'Profile 23',
+        sessionId: 'session-1',
+        loginHint: 'new-profile-user@gmail.com',
+      });
+    });
   });
 });

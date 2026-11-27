@@ -320,6 +320,7 @@ describe('cloud account renderer IPC', () => {
     const handle = { sessionId: '11111111-1111-4111-8111-111111111111' };
     const session = {
       prepare: vi.fn(async () => handle),
+      getAuthorizationUrl: vi.fn(() => 'https://accounts.google.com/o/oauth2/v2/auth'),
       open: vi.fn(),
       copy: vi.fn(),
       wait: vi.fn(),

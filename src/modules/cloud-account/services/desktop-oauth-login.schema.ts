@@ -6,6 +6,7 @@ import { GoogleLoginDiagnosticSchema } from './operation-diagnostic.schema';
 export const DesktopOAuthLoginInputSchema = z.strictObject({
   oauthClientKey: OAuthClientKeySchema.optional(),
   reauthAccountId: CloudAccountIdSchema.optional(),
+  loginHint: z.string().trim().min(1).max(320).optional(),
 });
 
 export const DesktopOAuthCodeSchema = z

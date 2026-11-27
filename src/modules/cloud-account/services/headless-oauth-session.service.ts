@@ -71,6 +71,7 @@ export class HeadlessOAuthSessionService {
     oauthClientKey?: string,
     operation = new GoogleLoginOperation(),
     reauthAccountId?: string,
+    loginHint?: string,
   ): Promise<{ sessionId: string; authorizationUrl: string; diagnosticId: string }> {
     if (this.stopping) {
       throw new DesktopOAuthLoginError(
@@ -83,7 +84,7 @@ export class HeadlessOAuthSessionService {
     }
 
     const starting = operation.context.run(() =>
-      this.startSession(oauthClientKey, operation, reauthAccountId),
+      this.startSession(oauthClientKey, operation, reauthAccountId, loginHint),
     );
     this.starting = starting;
     try {
@@ -97,11 +98,13 @@ export class HeadlessOAuthSessionService {
     oauthClientKey?: string,
     operation = new GoogleLoginOperation(),
     reauthAccountId?: string,
+    loginHint?: string,
   ): Promise<{ sessionId: string; authorizationUrl: string; diagnosticId: string }> {
     const clientKey = oauthClientKey ?? GoogleAPIService.getActiveOAuthClientKey();
     const reauthEmail = reauthAccountId
       ? (await CloudAccountRepo.getAccount(reauthAccountId))?.email
       : undefined;
+    const resolvedLoginHint = reauthEmail ?? loginHint?.trim();
     const session: OAuthSession = {
       operation,
       id: crypto.randomUUID(),
@@ -145,7 +148,7 @@ export class HeadlessOAuthSessionService {
         GoogleAPIService.getAuthUrl(clientKey, {
           redirectUri: session.redirectUri,
           state: session.state,
-          ...(reauthEmail ? { loginHint: reauthEmail } : {}),
+          ...(resolvedLoginHint ? { loginHint: resolvedLoginHint } : {}),
         }),
       );
       this.session = session;

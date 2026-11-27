@@ -5,7 +5,12 @@ import {
   formatResetTimeLabel,
   getQuotaStatus,
 } from '@/modules/cloud-account/utils/quota-display';
-import { isWeeklyQuotaBucket } from '@/modules/cloud-account/utils/quota-groups';
+import { isWeeklyQuotaBucket, type QuotaWindow } from '@/modules/cloud-account/utils/quota-groups';
+import {
+  DEFAULT_QUOTA_GROUP_VISIBILITY,
+  visibleQuotaGroups,
+  type QuotaGroupVisibility,
+} from '@/modules/cloud-account/utils/quota-group-visibility';
 import { QUOTA_TEXT_COLOR_CLASS_BY_STATUS } from './quota-colors';
 
 interface CompactQuotaRow {
@@ -66,11 +71,22 @@ function buildSectionsFromGroups(
   groups: readonly CloudQuotaGroup[],
   fiveHourLabel: string,
   weeklyLabel: string,
+  quotaWindow: QuotaWindow,
 ): CompactQuotaSection[] {
   return groups
     .filter((group) => group.buckets.length > 0)
     .map((group) => {
-      const sortedBuckets = [...group.buckets].sort((a, b) => {
+      const windowFilteredBuckets = group.buckets.filter((bucket) => {
+        const weekly = isWeeklyQuotaBucket(bucket);
+        if (quotaWindow === '5h') {
+          return !weekly;
+        }
+        if (quotaWindow === 'weekly') {
+          return weekly;
+        }
+        return true;
+      });
+      const sortedBuckets = [...windowFilteredBuckets].sort((a, b) => {
         const aWeekly = isWeeklyQuotaBucket(a) ? 0 : 1;
         const bWeekly = isWeeklyQuotaBucket(b) ? 0 : 1;
         return aWeekly - bWeekly;
@@ -85,7 +101,8 @@ function buildSectionsFromGroups(
           resetTime: bucket.reset_time,
         })),
       };
-    });
+    })
+    .filter((section) => section.rows.length > 0);
 }
 
 function buildFallbackSections(
@@ -93,7 +110,12 @@ function buildFallbackSections(
   geminiTitle: string,
   claudeTitle: string,
   fiveHourLabel: string,
+  visibility: QuotaGroupVisibility,
+  quotaWindow: QuotaWindow,
 ): CompactQuotaSection[] {
+  if (quotaWindow === 'weekly') {
+    return [];
+  }
   const entries = Object.entries(quota?.models ?? {});
   if (entries.length === 0) {
     return [];
@@ -126,24 +148,43 @@ function buildFallbackSections(
   };
 
   return [
-    summarize('gemini', geminiTitle, (name) => name.includes('gemini')),
-    summarize('claude-gpt', claudeTitle, (name) => name.includes('claude') || name.includes('gpt')),
+    visibility.fiveHour.gemini
+      ? summarize('gemini', geminiTitle, (name) => name.includes('gemini'))
+      : null,
+    visibility.fiveHour.claude
+      ? summarize('claude-gpt', claudeTitle, (name) => name.includes('claude') || name.includes('gpt'))
+      : null,
   ].filter((section): section is CompactQuotaSection => section !== null);
 }
 
-export function CompactQuotaSummary({ quota }: { quota?: CloudQuotaData }) {
+export function CompactQuotaSummary({
+  quota,
+  quotaGroupVisibility = DEFAULT_QUOTA_GROUP_VISIBILITY,
+  quotaWindow = 'both',
+}: {
+  quota?: CloudQuotaData;
+  quotaGroupVisibility?: QuotaGroupVisibility;
+  quotaWindow?: QuotaWindow;
+}) {
   const { t } = useTranslation();
   const fiveHourLabel = t('cloud.compact-summary.five-hour-limit');
   const weeklyLabel = t('cloud.compact-summary.weekly-limit');
 
+  const filteredGroups =
+    quota?.quota_groups && quota.quota_groups.length > 0
+      ? visibleQuotaGroups(quota.quota_groups, quotaGroupVisibility)
+      : [];
+
   const sections =
     quota?.quota_groups && quota.quota_groups.length > 0
-      ? buildSectionsFromGroups(quota.quota_groups, fiveHourLabel, weeklyLabel)
+      ? buildSectionsFromGroups(filteredGroups, fiveHourLabel, weeklyLabel, quotaWindow)
       : buildFallbackSections(
           quota,
           t('cloud.compact-summary.gemini-models'),
           t('cloud.compact-summary.claude-gpt-models'),
           fiveHourLabel,
+          quotaGroupVisibility,
+          quotaWindow,
         );
 
   if (sections.length === 0) {

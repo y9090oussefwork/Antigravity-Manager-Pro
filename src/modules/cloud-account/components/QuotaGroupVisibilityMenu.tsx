@@ -9,7 +9,11 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
-import type { QuotaGroupVisibility } from '@/modules/cloud-account/utils/quota-group-visibility';
+import {
+  isClaudeQuotaHidden,
+  withClaudeQuotaVisible,
+  type QuotaGroupVisibility,
+} from '@/modules/cloud-account/utils/quota-group-visibility';
 
 interface QuotaGroupVisibilityMenuProps {
   value: QuotaGroupVisibility;
@@ -18,6 +22,7 @@ interface QuotaGroupVisibilityMenuProps {
 
 export function QuotaGroupVisibilityMenu({ value, onChange }: QuotaGroupVisibilityMenuProps) {
   const { t } = useTranslation();
+  const showClaudeEverywhere = !isClaudeQuotaHidden(value);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -27,6 +32,16 @@ export function QuotaGroupVisibilityMenu({ value, onChange }: QuotaGroupVisibili
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
+        <DropdownMenuCheckboxItem
+          checked={showClaudeEverywhere}
+          onSelect={(event) => event.preventDefault()}
+          onCheckedChange={(checked) =>
+            onChange(withClaudeQuotaVisible(value, checked === true))
+          }
+        >
+          {t('cloud.quota-display.show-claude-everywhere')}
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuSeparator />
         {(['fiveHour', 'weekly'] as const).map((window) => (
           <div key={window}>
             <DropdownMenuLabel>

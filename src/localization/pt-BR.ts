@@ -2041,6 +2041,8 @@ const ptBR = {
       title: 'Exibição de cota',
       description:
         'Escolha o que aparece nos cartões de conta. Isso não altera a cota nem qual conta é usada para requisições.',
+      'show-claude-everywhere': 'Mostrar cota Claude / GPT em todos os lugares',
+      'gemini-only-short': 'Somente Gemini',
       'five-hours-gemini': 'Cota de 5 horas do Gemini',
       'five-hours-claude': 'Cota de 5 horas do Claude',
       'weekly-gemini': 'Cota semanal do Gemini',

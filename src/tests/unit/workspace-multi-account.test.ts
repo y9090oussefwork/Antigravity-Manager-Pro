@@ -8,11 +8,13 @@ import type { CloudAccount } from '@/modules/cloud-account/types';
 import { WorkspaceProfileRepo } from '@/modules/workspace/persistence/workspace-profile-repo';
 import { checkAndSwitchWorkspacesIfNeeded } from '@/modules/workspace/services/workspace-auto-switch.service';
 import type { WorkspaceProfile } from '@/modules/workspace/types';
+import { GEMINI_ONLY_QUOTA_VISIBILITY } from '@/modules/cloud-account/utils/quota-group-visibility';
 import {
   classifyWorkspaceAccountStatus,
   filterWorkspaceAccountsByStatus,
   getWorkspaceAccountMinQuotaPercentage,
   getWorkspaceAccountStatusCounts,
+  getWorkspaceAccountWindowQuota,
 } from '@/modules/workspace/utils/workspace-account-status';
 import { getProfilesBaseDir } from '@/shared/platform/paths';
 
@@ -414,5 +416,78 @@ describe('workspace multi-account support', () => {
         toAccountId: 'acc-healthy',
       },
     ]);
+  });
+
+  it('tracks 5h and weekly windows separately and excludes Claude quota when hidden', () => {
+    const account = makeViewAccount('acc-gemini-ok-claude-zero', {
+      quota: {
+        subscription_tier: 'pro',
+        models: {
+          'gemini-3.8-flash-high': { percentage: 88, resetTime: '2026-11-28T00:00:00Z' },
+          'claude-sonnet-4-6': { percentage: 100, resetTime: '2026-11-28T00:00:00Z' },
+        },
+        quota_groups: [
+          {
+            display_name: 'Gemini Models',
+            buckets: [
+              {
+                bucket_id: 'gemini-weekly',
+                window: 'weekly',
+                remaining_fraction: 0.13,
+                reset_time: '2026-12-03T00:00:00Z',
+              },
+              {
+                bucket_id: 'gemini-5h',
+                window: '5h',
+                remaining_fraction: 0.88,
+                reset_time: '2026-11-28T00:00:00Z',
+              },
+            ],
+          },
+          {
+            display_name: 'Claude and GPT models',
+            buckets: [
+              {
+                bucket_id: '3p-weekly',
+                window: 'weekly',
+                remaining_fraction: 0,
+                reset_time: '2026-12-04T00:00:00Z',
+              },
+              {
+                bucket_id: '3p-5h',
+                window: '5h',
+                remaining_fraction: 1,
+                reset_time: '2026-11-28T00:00:00Z',
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const fullWindowSummary = getWorkspaceAccountWindowQuota(account.quota);
+    expect(fullWindowSummary).toEqual({
+      fiveHour: 88,
+      weekly: 0,
+      gemini: { fiveHour: 88, weekly: 13 },
+      claude: { fiveHour: 100, weekly: 0 },
+      effectiveMin: 0,
+    });
+    expect(classifyWorkspaceAccountStatus(account, 'other-active')).toBe('exhausted');
+
+    const geminiOnlySummary = getWorkspaceAccountWindowQuota(
+      account.quota,
+      GEMINI_ONLY_QUOTA_VISIBILITY,
+    );
+    expect(geminiOnlySummary).toEqual({
+      fiveHour: 88,
+      weekly: 13,
+      gemini: { fiveHour: 88, weekly: 13 },
+      claude: { fiveHour: null, weekly: null },
+      effectiveMin: 13,
+    });
+    expect(
+      classifyWorkspaceAccountStatus(account, 'other-active', GEMINI_ONLY_QUOTA_VISIBILITY),
+    ).toBe('available');
   });
 });

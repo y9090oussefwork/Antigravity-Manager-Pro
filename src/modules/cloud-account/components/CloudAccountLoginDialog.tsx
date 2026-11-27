@@ -4,6 +4,7 @@ import {
   Cloud,
   DatabaseZap,
   ExternalLink,
+  Globe,
   KeyRound,
   LogIn,
   Plus,
@@ -29,9 +30,11 @@ import type { CloudAccountView } from '../services/cloud-account-view';
 import { LocalAccountImportPanel } from '../local-import/components/LocalAccountImportDialog';
 import { CloudAccountOAuthPanel } from './CloudAccountOAuthPanel';
 import { CloudAccountCredentialImportPanel } from './CloudAccountCredentialImportPanel';
+import { BrowserProfileDiscoveryPanel } from './BrowserProfileDiscoveryPanel';
 
 const methods = [
   { id: 'google', icon: Cloud },
+  { id: 'browsers', icon: Globe },
   { id: 'credentials', icon: KeyRound },
   { id: 'local', icon: DatabaseZap },
 ] as const;
@@ -48,6 +51,7 @@ export interface CloudAccountLoginDialogProps {
   onOpenChange?: (open: boolean) => void;
   reauthAccount?: ReauthAccountTarget | null;
   hideTrigger?: boolean;
+  initialMethod?: AddMethod;
 }
 
 export function CloudAccountLoginDialog({
@@ -55,13 +59,14 @@ export function CloudAccountLoginDialog({
   onOpenChange: controlledOnOpenChange,
   reauthAccount = null,
   hideTrigger = false,
+  initialMethod = 'google',
 }: CloudAccountLoginDialogProps = {}) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const validationLink = useOpenAccountValidationLink();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
-  const [method, setMethod] = useState<AddMethod>('google');
+  const [method, setMethod] = useState<AddMethod>(initialMethod);
   const [importing, setImporting] = useState(false);
   const [activeReauthTarget, setActiveReauthTarget] = useState<ReauthAccountTarget | null>(null);
   const [pendingValidationAccount, setPendingValidationAccount] = useState<CloudAccountView | null>(
@@ -145,20 +150,30 @@ export function CloudAccountLoginDialog({
           setValidationRecheckState('idle');
           setActiveReauthTarget(null);
           if (nextOpen) {
-            setMethod('google');
+            setMethod(initialMethod);
           }
         }
       }}
     >
       {!hideTrigger && (
         <DialogTrigger asChild>
-          <Button>
-            <Plus aria-hidden="true" className="size-4" />
-            {t('cloud.addAccount')}
-          </Button>
+          {initialMethod === 'browsers' ? (
+            <Button variant="outline">
+              <Globe aria-hidden="true" className="size-4" />
+              {t('cloud.add-flow.browsers.open-shortcut')}
+            </Button>
+          ) : (
+            <Button>
+              <Plus aria-hidden="true" className="size-4" />
+              {t('cloud.addAccount')}
+            </Button>
+          )}
         </DialogTrigger>
       )}
-      <DialogContent className="max-w-xl" closeDisabled={closeBusy}>
+      <DialogContent
+        className={method === 'browsers' && !effectiveReauthTarget ? 'max-w-2xl' : 'max-w-xl'}
+        closeDisabled={closeBusy}
+      >
         <DialogHeader>
           <DialogTitle>
             {pendingValidationAccount
@@ -273,7 +288,7 @@ export function CloudAccountLoginDialog({
               }}
               activationMode="manual"
             >
-              <TabsList className="grid w-full grid-cols-3" aria-label={t('cloud.add-flow.methods')}>
+              <TabsList className="grid w-full grid-cols-4" aria-label={t('cloud.add-flow.methods')}>
                 {methods.map(({ id, icon: Icon }) => (
                   <TabsTrigger
                     key={id}
@@ -291,6 +306,17 @@ export function CloudAccountLoginDialog({
                   <CloudAccountOAuthPanel
                     sessionQueueRef={sessionQueueRef}
                     onAuthorized={accountSaved}
+                  />
+                )}
+              </TabsContent>
+              <TabsContent value="browsers" className="mt-4">
+                {method === 'browsers' && (
+                  <BrowserProfileDiscoveryPanel
+                    onBusyChange={setImporting}
+                    onValidationRequired={(account) => {
+                      setPendingValidationAccount(account);
+                      setValidationRecheckState('idle');
+                    }}
                   />
                 )}
               </TabsContent>

@@ -9,6 +9,7 @@ import type {
   GetAccountProjectIdInput,
   SetAccountProjectIdInput,
 } from '../services/cloud-account-project-id.schema';
+import type { OpenBrowserProfileInput } from '../services/browser-profile-discovery.schema';
 
 export function listCloudAccounts() {
   return ipc.client.cloud.listCloudAccounts();
@@ -76,10 +77,15 @@ export function setWeeklyWarmupConfig(config: WeeklyWarmupConfig) {
   return ipc.client.cloud.setWeeklyWarmupConfig(config);
 }
 
-export function prepareOAuthSession(oauthClientKey?: string, reauthAccountId?: string) {
+export function prepareOAuthSession(
+  oauthClientKey?: string,
+  reauthAccountId?: string,
+  loginHint?: string,
+) {
   return ipc.client.cloud.oauthSession.prepare({
     ...(oauthClientKey ? { oauthClientKey } : {}),
     ...(reauthAccountId ? { reauthAccountId } : {}),
+    ...(loginHint ? { loginHint } : {}),
   });
 }
 
@@ -181,6 +187,14 @@ export function setAccountRouting(input: SetCloudAccountRoutingInput) {
 
 export function exportCloudAccounts(input: { stripTokens?: boolean }) {
   return ipc.client.cloud.exportCloudAccounts(input);
+}
+
+export function discoverBrowserProfiles() {
+  return ipc.client.cloud.discoverBrowserProfiles();
+}
+
+export function openBrowserProfile(input: OpenBrowserProfileInput) {
+  return ipc.client.cloud.openBrowserProfile(input);
 }
 
 export function importCloudAccounts(input: { strategy?: 'merge' | 'overwrite' | 'skip-existing' }) {

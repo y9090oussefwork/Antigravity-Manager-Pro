@@ -15,7 +15,27 @@ export const DEFAULT_QUOTA_GROUP_VISIBILITY: QuotaGroupVisibility = {
   weekly: { gemini: true, claude: true },
 };
 const STORAGE_KEY = 'accounts_quota_group_visibility';
+export const QUOTA_GROUP_VISIBILITY_STORAGE_KEY = STORAGE_KEY;
+export const QUOTA_GROUP_VISIBILITY_CHANGE_EVENT = 'agm:quota-group-visibility-changed';
+export const GEMINI_ONLY_QUOTA_VISIBILITY: QuotaGroupVisibility = {
+  fiveHour: { gemini: true, claude: false },
+  weekly: { gemini: true, claude: false },
+};
 type PreferenceStorage = Pick<Storage, 'getItem' | 'setItem'>;
+
+export function isClaudeQuotaHidden(visibility: QuotaGroupVisibility): boolean {
+  return !visibility.fiveHour.claude && !visibility.weekly.claude;
+}
+
+export function withClaudeQuotaVisible(
+  visibility: QuotaGroupVisibility,
+  showClaude: boolean,
+): QuotaGroupVisibility {
+  return {
+    fiveHour: { ...visibility.fiveHour, claude: showClaude },
+    weekly: { ...visibility.weekly, claude: showClaude },
+  };
+}
 
 export function readQuotaGroupVisibility(storage: () => PreferenceStorage): QuotaGroupVisibility {
   try {
@@ -33,12 +53,15 @@ export function saveQuotaGroupVisibility(
 ): void {
   try {
     storage().setItem(STORAGE_KEY, JSON.stringify(value));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(QUOTA_GROUP_VISIBILITY_CHANGE_EVENT));
+    }
   } catch {
     // Display preferences remain usable when browser storage is unavailable.
   }
 }
 
-function quotaFamily(metadata: string): 'gemini' | 'claude' | null | undefined {
+export function quotaFamily(metadata: string): 'gemini' | 'claude' | null | undefined {
   const gemini = /gemini/i.test(metadata);
   const claude = /claude|(?:^|[^a-z0-9])(?:gpt|3p)(?:[^a-z0-9]|$)/i.test(metadata);
   // Unclassified or shared limits stay visible rather than hiding unrelated quota.
@@ -51,7 +74,7 @@ function quotaFamily(metadata: string): 'gemini' | 'claude' | null | undefined {
   return gemini ? 'gemini' : 'claude';
 }
 
-function visibleQuotaGroups(
+export function visibleQuotaGroups(
   groups: CloudQuotaGroup[],
   visibility: QuotaGroupVisibility,
 ): CloudQuotaGroup[] {

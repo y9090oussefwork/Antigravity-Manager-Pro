@@ -4,6 +4,8 @@ import { Plus, RefreshCw, Briefcase, Search, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/use-toast';
+import { QuotaGroupVisibilityMenu } from '@/modules/cloud-account/components/QuotaGroupVisibilityMenu';
+import { useQuotaGroupVisibility } from '@/modules/cloud-account/hooks/useQuotaGroupVisibility';
 import { useCloudAccounts } from '@/modules/cloud-account/hooks/useCloudAccounts';
 import {
   useWorkspaces,
@@ -73,6 +75,7 @@ export const WorkspacesView: React.FC<WorkspacesViewProps> = ({
 }) => {
   const { t } = useTranslation();
   const { toast } = useToast();
+  const [quotaGroupVisibility, setQuotaGroupVisibility] = useQuotaGroupVisibility();
   const [dialogOpen, setDialogOpen] = useState(false);
   const queryWorkspaces = useWorkspaces({ enabled: customWorkspaces === undefined });
   const queryAccounts = useCloudAccounts(
@@ -297,7 +300,11 @@ export const WorkspacesView: React.FC<WorkspacesViewProps> = ({
           <p className="text-muted-foreground mt-1 text-sm">{t('workspace-profile.intro')}</p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <QuotaGroupVisibilityMenu
+            value={quotaGroupVisibility}
+            onChange={setQuotaGroupVisibility}
+          />
           <Button
             variant="outline"
             size="icon"
